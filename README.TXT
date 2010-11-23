@@ -1,4 +1,6 @@
-V0.26
+V0.27
+
+PARSES: A Pipeline for Analysis of RNA-Sequencing Exogenous Sequences
 
 Step by step instructions (exclude `backquotes` when typing a command):
 1. Open a terminal.
@@ -13,13 +15,13 @@ Step by step instructions (exclude `backquotes` when typing a command):
 10. Open a terminal in ~/bin.
 11. Execute `chmod +x *.pl`
 12. Change directory to directory containing FASTQ sequence (you may want to make a backup of your data, my program shouldn't do anything to it but I would hate to be responsible for such a thing.). For instance if the data is contained in /usr/share execute `cd /usr/share`
-13. Execute `sudo rake -f ~/bin/rakefile.rb seq=mysequence file=reads.fastq install`. Please note your sequence name should not have any spaces. Keep all of the default settings for the MEGAN install. If any of the installations fail manually install them.
-14. Execute `rake -f ~/bin/rakefile.rb seq=mysequence file=reads.fastq`.
+13. Execute `sudo rake -f ~/bin/rakefile.rb seq=mysequence file=reads.fastq type=solexa install`. Please note your sequence name should not have any spaces. Keep all of the default settings for the MEGAN install. If any of the installations fail manually install them.
+14. Execute `rake -f ~/bin/rakefile.rb seq=mysequence file=reads.fastq type=solexa`.
 15. Register MEGAN if you have not yet. The program should open and you can follow the instructions to get emailed a key.
 16. Update the LCA Paramaters by selecting Options->Change LCA Parameters in MEGAN.
 16. Right click the nodes of each of the taxonomies individually you are interested in and select 'Extract Reads by Taxa' for each. Keep the default name. Exit MEGAN.
-17. If the pipeline continues running, good, otherwise, execute `rake -f ~/bin/rakefile.rb seq=mysequence file=reads.fastq`
-18. MEGAN should open a file with all of the reads you extracted de novo aligned and binned into their original taxonomies. You can change a file anywhere in the process and the pipeline will run from that point to the end (or whatever task you select) when you execute `rake -f ~/bin/rakefile.rb seq=mysequence file=reads.fastq`.
+17. If the pipeline continues running, good, otherwise, execute `rake -f ~/bin/rakefile.rb seq=mysequence`
+18. MEGAN should open a file with all of the reads you extracted de novo aligned and binned into their original taxonomies. You can change a file anywhere in the process and the pipeline will run from that point to the end (or whatever task you select) when you execute `rake -f ~/bin/rakefile.rb seq=mysequence`.
 
 Requirements:
 Root priveleges if installing software.
@@ -34,19 +36,19 @@ Xnovotonm.pl marked as executable in same folder as rakefile
 Working directory is the directory in which the fasta sequence file is contained.
 
 If you want to get all applications used in the pipeline installed upfront example:
-sudo rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta install
+sudo rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta type=illumina1.3 install
 
 First run example:
-rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta
+rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta type=illumina1.3
 
 Subsequent runs example:
 rake -f /rake/file/location seq=NameYouGiveToYourSequence
 
 Run up to a certain point (stop after executing a specified task):
-rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta taskName
+rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta type=illumina1.3 taskName
 
 To get all task names (list of all tasks are below):
-rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta -T
+rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta type=illumina1.3 -T
 
 rake abyssInstall              # Install latest version of ABySS.
 rake alignSequence             # Novoalign - Align reads in to base genome

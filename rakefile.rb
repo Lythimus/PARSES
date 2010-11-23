@@ -9,7 +9,7 @@ require 'rake/clean'
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = "PARSES"
-VER = "0.26"
+VER = "0.27"
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
@@ -218,10 +218,10 @@ task :removeSpans => [:bowtieIndex, :tophatInstall, :removeHuman, sequence.blast
 file sequence.blast1Path => sequence.removeNonMappedPath do
 	puts "RemoveSpans"
 	sh %{
-		tophat -p #{ncpu} #{setDataTypes.tophat} --output-dir #{ENV['seq']}_tophat_out #{progSettings.bowtieIndex} #{sequence.filePath}
-		samtools view -h -o #{ENV['seq']}_tophat_out/accepted_hits.sam #{ENV['seq']}_tophat_out/accepted_hits.bam
-		{PROG_DIR}/Xextractspans.pl "#{ENV['seq']}_tophat_out/accepted_hits.sam"
-		{PROG_DIR}/Xfilterspans.pl "#{sequence.removeNonMappedPath}" "#{ENV['seq']}_tophat_out/accepted_hits.sam.spans"
+		tophat -p #{ncpu} #{setDataTypes.tophat} --output-dir #{ENV['seq']}_tophat_out #{progSettings.bowtieIndex} #{sequence.filePath};
+		samtools view -h -o #{ENV['seq']}_tophat_out/accepted_hits.sam #{ENV['seq']}_tophat_out/accepted_hits.bam;
+		{PROG_DIR}/Xextractspans.pl "#{ENV['seq']}_tophat_out/accepted_hits.sam";
+		{PROG_DIR}/Xfilterspans.pl "#{sequence.removeNonMappedPath}" "#{ENV['seq']}_tophat_out/accepted_hits.sam.spans";
 	}
 	if $?.exitstatus != 0
 		puts "Removal of spans from source with Tophat not performed (status = #{$?.exitstatus})"
@@ -372,7 +372,7 @@ task :bowtieIndex => [:hgInstall, :bowtieInstall] do
 			sh %{
 				cd #{progSettings.humanGenomeDatabase};
 				bowtie-build #{resourceFiles} #{progSettings.bowtieIndex};
-				`echo "export BOWTIEINDEX=#{progSettings.bowtieIndex}" >> ~/.#{shell}rc;`
+				`echo "export BOWTIEINDEX=#{progSettings.bowtieIndex}" >> ~/.#{shell}rc;`;
 			}
 		end
 	end
@@ -444,9 +444,9 @@ task :samtoolsInstall do
 		sh %{
 			cd /usr/bin/#{samtools};
 			make;
-			cp libbam.a /usr/lib
-			mkdir /usr/include/bam
-			cp *.h /usr/include/bam
+			cp libbam.a /usr/lib;
+			mkdir /usr/include/bam;
+			cp *.h /usr/include/bam;
 			ln -s /usr/bin/#{samtools}/samtools /usr/bin;
 		}
 	end
@@ -563,21 +563,20 @@ task :blastInstall do
 end
 
 desc "Install latest version of the NT database."
-task :ntInstall do
+task :ntInstall => :blastInstall do
 	if ENV['BLASTDB'].to_s.empty? and progSettings.ntDatabase.to_s.empty?
-		if progSettings.ntDatabase.to_s.empty?
-			progSettings.ntDatabase = ENV['BLASTDB'].to_s
+		progSettings.ntDatabase=`#{find} "nt.nal" | head -1`.chomp('.nal')
+		if !ENV['BLASTDB'].to_s.empty?
+			progSettings.ntDatabase = ENV['BLASTDB'].to_s.chomp
+		else
+			sh %{
+				mkdir /usr/share/nt;
+				cd /usr/share/nt;
+				/usr/bin/ncbi-blast*/c++/src/app/blast/update_blastdb.pl nt;
+				for i in nt*.tar.gz; do tar -xzf $i; rm $i; done;
+				`echo "export BLASTDB=/usr/share/nt/nt" >> ~/.#{shell}rc;`;
+			}
 		end
-		sh %{
-			mkdir /usr/share/nt;
-			cd /usr/share/nt;
-			/usr/bin/ncbi-blast*/c++/src/app/blast/update_blastdb.pl nt
-			for i in nt*.tar.gz; do tar -xzf $i; rm $i; done;
-			`echo "export BLASTDB=/usr/share/nt" >> ~/.#{shell}rc;`
-		}
-	end
-	if progSettings.ntDatabase.to_s.empty?
-		progSettings.ntDatabase = ENV['BLASTDB'].to_s
 	end
 end
 
@@ -594,8 +593,8 @@ task :meganInstall do
 		}
 		megan = File.basename(megan)
 		sh %{
-			chmod +x #{megan}
-			./#{megan}
+			chmod +x #{megan};
+			./#{megan};
 		}
 		if (arch == 64) # If CPU architecture is 64-bit, allow for more than 2GB of RAM and force 64-bit Java.
 			text = File.new(`which MEGAN`.chomp).read.gsub(/"\$prg_dir\/\$progname" "-server" "-Xms\d+." "-Xmx\d+."/, "\"$prg_dir/$progname\" \"-server\" \"-d64\" \"-Xms#{memInGigs}G\" \"-Xmx#{memInGigs}G\"")
