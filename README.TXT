@@ -1,8 +1,8 @@
-V0.27
+V0.28
 
 PARSES: A Pipeline for Analysis of RNA-Sequencing Exogenous Sequences
 
-Step by step instructions (exclude `backquotes` when typing a command):
+Step by step instructions for OS X (exclude `backquotes` when typing a command):
 1. Open a terminal.
 2. Execute `which gcc`, if /usr/bin/gcc is returned then continue. Otherwise, you have to download and install Xcode. If you have Leopard download Xcode from here: http://adcdownload.apple.com/Developer_Tools/xcode_3.1.3_developer_tools/xcode313_2736_developerdvd.dmg. If you have Snow Leopard download Xcode from here: http://adcdownload.apple.com/ios/ios_sdk_4.1__final/xcode_3.2.4_and_ios_sdk_4.1.dmg. Simply open the dmg file when it is finished downloading and agree to everything with the default settings.
 3. Execute `which rake`, if a directory is returned skip to step 9.
@@ -19,9 +19,9 @@ Step by step instructions (exclude `backquotes` when typing a command):
 14. Execute `rake -f ~/bin/rakefile.rb seq=mysequence file=reads.fastq type=solexa`.
 15. Register MEGAN if you have not yet. The program should open and you can follow the instructions to get emailed a key.
 16. Update the LCA Paramaters by selecting Options->Change LCA Parameters in MEGAN.
-16. Right click the nodes of each of the taxonomies individually you are interested in and select 'Extract Reads by Taxa' for each. Keep the default name. Exit MEGAN.
-17. If the pipeline continues running, good, otherwise, execute `rake -f ~/bin/rakefile.rb seq=mysequence`
-18. MEGAN should open a file with all of the reads you extracted de novo aligned and binned into their original taxonomies. You can change a file anywhere in the process and the pipeline will run from that point to the end (or whatever task you select) when you execute `rake -f ~/bin/rakefile.rb seq=mysequence`.
+17. Right click the nodes of each of the taxonomies individually you are interested in and select 'Extract Reads by Taxa' for each. Keep the default name. Exit MEGAN.
+18. If the pipeline continues running, good, otherwise, execute `rake -f ~/bin/rakefile.rb seq=mysequence`
+19. MEGAN should open a file with all of the reads you extracted de novo aligned and binned into their original taxonomies. You can change a file anywhere in the process and the pipeline will run from that point to the end (or whatever task you select) when you execute `rake -f ~/bin/rakefile.rb seq=mysequence`.
 
 Requirements:
 Root priveleges if installing software.
@@ -50,11 +50,13 @@ rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileN
 To get all task names (list of all tasks are below):
 rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta type=illumina1.3 -T
 
-rake abyssInstall              # Install latest version of ABySS.
+rake abyssInstall              # Install latest version of ABySS with Googl...
 rake alignSequence             # Novoalign - Align reads in to base genome
 rake blastInstall              # Install latest version of BLAST+.
 rake bowtieIndex               # Create an index for bowtie/tophat of the h...
 rake bowtieInstall             # Install latest version of Bowtie.
+rake clean                     # Remove any temporary products.
+rake clobber                   # Remove any generated file.
 rake denovoAssembleCluster     # ABySS - Assemble reads associated with clu...
 rake hgInstall                 # Install latest version of human genome dat...
 rake install                   # Install latest version of everything.
@@ -69,11 +71,12 @@ rake ntInstall                 # Install latest version of the NT database.
 rake parallelIteratorInstall   # Install latest version of Parallel::Iterat...
 rake removeHuman               # Xnovotonm - Harvest non-base organism reads
 rake removeSpans               # Tophat - Align spanning reads in order to ...
+rake reserialize               # Automatically saving any settings changes ...
 rake samtoolsInstall           # Install latest version of Samtools.
 rake tophatInstall             # Install latest version of Tophat.
 
-Most parameters are set by default. This can be changed in the .sequenceName file which is produced automatically from the seq argument specificed. Editing this file will change the behavior of the program. It is highly recommended that none of the path strings are changed.
+Most parameters are set by default. This can be changed in the .sequenceName file which is produced automatically from the seq argument specificed and stored in your home directory. Editing this file will change the behavior of the program. It is highly recommended that none of the path strings are changed. PARSES does not yet have the ability to determine where execution should begin based on parameters reset. You can manually force PARSES to reprocess a file by executing the touch command, `touch filename`, on the file you wish to be reprocessed with the new settings.
 
 You may be interested in viewing the log file produced for your sequence called sequenceName.log.
 
-The script will find any human genome databases you have as long as the files have the form chr*.fa. In addition, any novoalign index will be located and used if it has the form '*hg*.ndx' as well as any bowtie index with the form '*hg*.ebwt' and any NT database if its location is specified by the BLASTDB environment database. Any database or index not found will be downloaded/built.
+PARSES will find any human genome databases you have as long as the files have the form chr*.fa. In addition, any novoalign index will be located and used if it has the form '*hg*.ndx' as well as any bowtie index with the form '*hg*.ebwt' and any NT database if its location is specified by the BLASTDB environment database. Any database or index not found will be downloaded/built.

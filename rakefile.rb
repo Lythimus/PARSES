@@ -9,7 +9,7 @@ require 'rake/clean'
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = "PARSES"
-VER = "0.27"
+VER = "0.28"
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
@@ -139,12 +139,16 @@ log.info("Begin run for seq=#{seqName} file=#{seqFileName} type=#{dataType} task
 
 ### GATHER SYSTEM INFORMATION
 
-if command? "locate" and (!ENV['LOCATE_PATH'].to_s.empty? or File.exists? '/var/lib/mlocate/mlocate.db')
-	find="locate"
-else
-	find="find / -name"
+locate = (command? "locate") && (!ENV['LOCATE_PATH'].to_s.empty? or File.exists? '/var/lib/mlocate/mlocate.db')
+def findFile(filename, locate)
+	path = `locate #{filename} | head -1` if locate
+	path = `find / -name #{filename} | head -1` if path.chomp.to_s.empty?
+	return path.chomp
 end
-shell=`ps -p $$ | tail -1 | awk '{print $NF}'`
+
+
+# shell=`ps -p $$ | tail -1 | awk '{print $NF}'` #supposedly more accurate method to return shell, but is returning sh instead of bash
+shell = File.basename(ENV['SHELL']).chomp
 
 class OS
 	OSX=0
@@ -323,7 +327,7 @@ end
 desc "Install latest version of human genome database."
 task :hgInstall do
 	if progSettings.humanGenomeDatabase.to_s.empty?
-		progSettings.humanGenomeDatabase=File.dirname(`#{find} "chr*.fa" | head -1`)
+		progSettings.humanGenomeDatabase=File.dirname(findFile("chr*.fa", locate))
 		if progSettings.humanGenomeDatabase.to_s.empty?
 			hg = ''
 			ftp = Net::FTP.new("hgdownload.cse.ucsc.edu")
@@ -341,7 +345,6 @@ task :hgInstall do
 				rm chromFa.tar.gz;
 			}
 			progSettings.humanGenomeDatabase = "/usr/share/" + hg
-			puts progSettings.humanGenomeDatabase
 		end
 	end
 end
@@ -349,10 +352,10 @@ end
 desc "Create an index for novoalign of the human genome database."
 task :novoIndex => [:hgInstall, :novoalignInstall] do
 	if progSettings.novoIndex.to_s.empty?
-		progSettings.novoIndex=`#{find} "*hg*.ndx" | head -1`
-		if progSettings.novoIndex.empty?
-			progSettings.novoIndex="#{progSettings.humanGenomeDatabase}/hgChrAll.ndx"
-			`novoindex #{progSettings.novoIndex} #{progSettings.humanGenomeDatabase}/chr[0-9XY].fa #{progSettings.humanGenomeDatabase}/chr[0-9][0-9].fa`
+		progSettings.novoIndex=findFile("*hg*.ndx", locate)
+		if progSettings.novoIndex.to_s.empty?
+			progSettings.novoIndex="#{progSettings.humanGenomeDatabase.to_s}/hgChrAll.ndx"
+			`novoindex #{progSettings.novoIndex.to_s} #{progSettings.humanGenomeDatabase.to_s}/chr[0-9XY].fa #{progSettings.humanGenomeDatabase.to_s}/chr[0-9][0-9].fa`
 		end
 	end
 end
@@ -360,7 +363,7 @@ end
 desc "Create an index for bowtie/tophat of the human genome database."
 task :bowtieIndex => [:hgInstall, :bowtieInstall] do
 	if progSettings.bowtieIndex.to_s.empty?
-		bowtieIndex=`#{find} "*hg*\.ebwt" | head -1`
+		bowtieIndex=findFile("*hg*\.ebwt", locate)
 		progSettings.bowtieIndex= $1 if bowtieIndex =~ /(.*hg.*)\.\d+\.ebwt/i
 		resourceFiles=""
 		if progSettings.bowtieIndex.to_s.empty?
@@ -370,9 +373,9 @@ task :bowtieIndex => [:hgInstall, :bowtieInstall] do
 			end
 			resourceFiles.chomp!(',')
 			sh %{
-				cd #{progSettings.humanGenomeDatabase};
-				bowtie-build #{resourceFiles} #{progSettings.bowtieIndex};
-				`echo "export BOWTIEINDEX=#{progSettings.bowtieIndex}" >> ~/.#{shell}rc;`;
+				cd #{progSettings.humanGenomeDatabase.to_s};
+				bowtie-build #{resourceFiles} #{progSettings.bowtieIndex.to_s};
+				`echo "export BOWTIEINDEX=#{progSettings.bowtieIndex.to_s}" >> ~/.#{shell}rc;`;
 			}
 		end
 	end
@@ -482,7 +485,6 @@ task :abyssInstall do
 		}
 		base = File.basename($1)
 		gsh = $2
-		puts gsh
 		Net::HTTP.start(base, 80) { |http|
 			File.open(File.basename(gsh), 'w'){ |file|
 				file.write(http.get(gsh).body)
@@ -564,19 +566,25 @@ end
 
 desc "Install latest version of the NT database."
 task :ntInstall => :blastInstall do
-	if ENV['BLASTDB'].to_s.empty? and progSettings.ntDatabase.to_s.empty?
-		progSettings.ntDatabase=`#{find} "nt.nal" | head -1`.chomp('.nal')
-		if !ENV['BLASTDB'].to_s.empty?
-			progSettings.ntDatabase = ENV['BLASTDB'].to_s.chomp
+	if ENV['BLASTDB'].to_s.empty?
+		if progSettings.ntDatabase.to_s.empty?
+			progSettings.ntDatabase = findFile("nt.nal", locate).to_s
+			if progSettings.ntDatabase.to_s.empty?
+				progSettings.ntDatabase="/usr/share/nt/nt"
+				sh %{
+					mkdir /usr/share/nt;
+					cd /usr/share/nt;
+					/usr/bin/ncbi-blast*/c++/src/app/blast/update_blastdb.pl nt;
+					for i in nt*.tar.gz; do tar -xzf $i; rm $i; done;
+					echo "export BLASTDB=#{progSettings.ntDatabase.to_s}" >> ~/.#{shell}rc;
+				}
+			end
 		else
-			sh %{
-				mkdir /usr/share/nt;
-				cd /usr/share/nt;
-				/usr/bin/ncbi-blast*/c++/src/app/blast/update_blastdb.pl nt;
-				for i in nt*.tar.gz; do tar -xzf $i; rm $i; done;
-				`echo "export BLASTDB=/usr/share/nt/nt" >> ~/.#{shell}rc;`;
-			}
+			`echo "export BLASTDB=#{progSettings.ntDatabase.to_s}" >> ~/.#{shell}rc`
+			`export BLASTDB=#{progSettings.ntDatabase.to_s}`
 		end
+	else
+		progSettings.ntDatabase = ENV['BLASTDB'].to_s.chomp if progSettings.ntDatabase.to_s.empty?
 	end
 end
 
@@ -617,6 +625,7 @@ end
 
 desc "Install latest version of everything."
 task :install do
+	#$ replace with regular expression on for each task at some point
 	Rake::Task[:novoalignInstall].invoke
 	Rake::Task[:bowtieInstall].invoke
 	Rake::Task[:hgInstall].invoke
@@ -631,6 +640,15 @@ task :install do
 	Rake::Task[:parallelIteratorInstall].invoke
 end
 
-# Reserialize object in case any changes have been made
-YAML::dump(sequence, File.open(".#{seqName}", "w"))
-YAML::dump(progSettings, File.open(File.expand_path("~/.#{PROG_NAME}"), "w"))
+desc "Automatically saving any settings changes which may have been made"
+task :reserialize do
+	puts progSettings.ntDatabase
+	# Reserialize object in case any changes have been made
+	YAML.dump(sequence, File.open(".#{seqName}", "w"))
+	YAML.dump(progSettings, File.open(File.expand_path("~/.#{PROG_NAME}"), "w"))
+end
+
+# invoke reserialize after all tasks have been executed
+current_tasks =  Rake.application.top_level_tasks
+current_tasks << :reserialize
+Rake.application.instance_variable_set(:@top_level_tasks, current_tasks)
