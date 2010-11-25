@@ -141,11 +141,10 @@ log.info("Begin run for seq=#{seqName} file=#{seqFileName} type=#{dataType} task
 
 locate = (command? "locate") && (!ENV['LOCATE_PATH'].to_s.empty? or File.exists? '/var/lib/mlocate/mlocate.db')
 def findFile(filename, locate)
-	path = `locate #{filename} | head -1` if locate
-	path = `find / -name #{filename} | head -1` if path.chomp.to_s.empty?
-	return path.chomp
+	path = `locate #{filename} | head -1`.chomp if locate
+	path = `find / -name #{filename} | head -1`.chomp if path.to_s.empty?
+	return path.to_s
 end
-
 
 # shell=`ps -p $$ | tail -1 | awk '{print $NF}'` #supposedly more accurate method to return shell, but is returning sh instead of bash
 shell = File.basename(ENV['SHELL']).chomp
