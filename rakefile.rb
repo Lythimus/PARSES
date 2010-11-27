@@ -9,7 +9,7 @@ require 'rake/clean'
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = "PARSES"
-VER = "0.28"
+VER = "0.29"
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
@@ -53,7 +53,7 @@ class Sequence
 		f = File.new(filePath)
 		line = f.gets
 		line = f.gets while line[0] =~ /\W/
-		@readLength = line
+		@readLength = line.length
 		f.close
 		@dataType = dataType
 #PATHS
@@ -117,11 +117,19 @@ class DataType
 	end
 end
 
-
 if File::exists?(".#{seqName}") #Sequence has been run before
 	sequence = YAML.load_file(".#{seqName}")
-	seqFileName = sequence.filePath
-	dataType = sequence.dataType
+	#Was a new file or file type entered from commandline?
+	if seqFileName.empty?
+		seqFileName = sequence.filePath
+	else
+		sequence.filePath = seqFileName
+	end
+	if dataType.empty?
+		dataType = sequence.dataType
+	else
+		sequence.dataType = dataType
+	end
 elsif seqFileName.empty? or dataType.empty? #Sequence has not been run and a file or data type is not specified
 	abort "Must specify a file of data to analyze for the first execution of the process as well as it's data type via the file= and type= options"
 else #Sequence has not been run, but file and file type are specified
@@ -567,7 +575,7 @@ desc "Install latest version of the NT database."
 task :ntInstall => :blastInstall do
 	if ENV['BLASTDB'].to_s.empty?
 		if progSettings.ntDatabase.to_s.empty?
-			progSettings.ntDatabase = findFile("nt.nal", locate).to_s
+			progSettings.ntDatabase = findFile("nt.nal", locate).to_s.chomp('.nal')
 			if progSettings.ntDatabase.to_s.empty?
 				progSettings.ntDatabase="/usr/share/nt/nt"
 				sh %{
@@ -583,7 +591,7 @@ task :ntInstall => :blastInstall do
 			`export BLASTDB=#{progSettings.ntDatabase.to_s}`
 		end
 	else
-		progSettings.ntDatabase = ENV['BLASTDB'].to_s.chomp if progSettings.ntDatabase.to_s.empty?
+		progSettings.ntDatabase = ENV['BLASTDB'].to_s.chomp('.nal') if progSettings.ntDatabase.to_s.empty?
 	end
 end
 
@@ -602,10 +610,14 @@ task :meganInstall do
 		sh %{
 			chmod +x #{megan};
 			./#{megan};
+			rm #{megan};
 		}
+		megan = `which MEGAN`.chomp
+		`ln -s #{findFile(MEGAN)} /usr/bin` if megan.empty?
+		megan = `which MEGAN`.chomp
 		if (arch == 64) # If CPU architecture is 64-bit, allow for more than 2GB of RAM and force 64-bit Java.
-			text = File.new(`which MEGAN`.chomp).read.gsub(/"\$prg_dir\/\$progname" "-server" "-Xms\d+." "-Xmx\d+."/, "\"$prg_dir/$progname\" \"-server\" \"-d64\" \"-Xms#{memInGigs}G\" \"-Xmx#{memInGigs}G\"")
-			File.open(`which MEGAN`.chomp, 'w+'){ |file| file.write(text) }
+			text = File.new(megan).read.gsub(/"\$prg_dir\/\$progname" "-server" "-Xms\d+." "-Xmx\d+."/, "\"$prg_dir/$progname\" \"-server\" \"-d64\" \"-Xms#{memInGigs}G\" \"-Xmx#{memInGigs}G\"")
+			File.open(megan, 'w+'){ |file| file.write(text) }
 		end
 	end
 end
@@ -641,7 +653,6 @@ end
 
 desc "Automatically saving any settings changes which may have been made"
 task :reserialize do
-	puts progSettings.ntDatabase
 	# Reserialize object in case any changes have been made
 	YAML.dump(sequence, File.open(".#{seqName}", "w"))
 	YAML.dump(progSettings, File.open(File.expand_path("~/.#{PROG_NAME}"), "w"))
