@@ -1,4 +1,4 @@
-V0.28
+V0.30
 
 PARSES: A Pipeline for Analysis of RNA-Sequencing Exogenous Sequences
 
@@ -55,8 +55,6 @@ rake alignSequence             # Novoalign - Align reads in to base genome
 rake blastInstall              # Install latest version of BLAST+.
 rake bowtieIndex               # Create an index for bowtie/tophat of the h...
 rake bowtieInstall             # Install latest version of Bowtie.
-rake clean                     # Remove any temporary products.
-rake clobber                   # Remove any generated file.
 rake denovoAssembleCluster     # ABySS - Assemble reads associated with clu...
 rake hgInstall                 # Install latest version of human genome dat...
 rake install                   # Install latest version of everything.

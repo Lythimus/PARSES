@@ -4,12 +4,14 @@ require 'net/http'
 require 'net/ftp'
 require 'uri'
 require 'rake/clean'
+require "rexml/document"
+require "ftools"
 
 #### DISCLAIMER
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = "PARSES"
-VER = "0.29"
+VER = "0.30"
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
@@ -48,7 +50,7 @@ seqFileName = "#{ENV['file']}".chomp
 dataType = "#{ENV['type']}".chomp
 
 class Sequence
-	attr_accessor :readLength, :dataType, :filePath, :novoalignPath, :removeNonMappedPath, :blast1Path, :megan1Path, :abyssPath, :abyssPathGlob, :minKmerLength, :maxKmerLength, :blastPathGlob, :eValue1, :eValue2, :blastOutputFormat, :megan2PathGlob, :expansionNumber, :maxMatches, :minScoreByLength, :topPercent, :winScore, :minSupport, :useCogs, :useGos, :imageFileType, :pipeEndGlob
+	attr_accessor :readLength, :dataType, :filePath, :novoalignPath, :removeNonMappedPath, :blast1Path, :megan1Path, :abyssPath, :abyssPathGlob, :minKmerLength, :maxKmerLength, :blastPathGlob, :blast2Path, :eValue1, :eValue2, :blastOutputFormat, :megan2Path, :expansionNumber, :maxMatches, :minScoreByLength, :topPercent, :winScore, :minSupport, :useCogs, :useGos, :imageFileType, :pipeEndPath
 	def initialize(filePath, dataType)
 		f = File.new(filePath)
 		line = f.gets
@@ -65,8 +67,9 @@ class Sequence
 		@abyssPath="#{megan1Path}.megan.rma"
 		@abyssPathGlob="reads-*.fasta"
 		@blastPathGlob="#{abyssPathGlob}.*.kmer.contigs.fa.kmerOptimized.fa"
-		@megan2PathGlob="#{blastPathGlob}.blast"
-		@pipeEndGlob="#{megan2PathGlob}.megan.rma"
+		@blast2Path="#{abyssPath}.kmerOptimized.fa"
+		@megan2Path="#{blast2Path}.blast"
+		@pipeEndPath="#{megan2Path}.megan.rma"
 #ABYSS
 		@minKmerLength=7
 		@maxKmerLength=readLength
@@ -202,7 +205,7 @@ desc "Novoalign - Align reads in to base genome"
 task :alignSequence => [:novoalignInstall, :hgInstall, :novoIndex, sequence.novoalignPath]
 file sequence.novoalignPath => sequence.filePath do
 	puts "Sequence Alignment"
-	`novoalign -d #{progSettings.novoIndex} #{setDataTypes.novoalign} -f #{sequence.filePath} > #{sequence.novoalignPath}`
+	`novoalign -d "#{progSettings.novoIndex}" #{setDataTypes.novoalign} -f "#{sequence.filePath}" > "#{sequence.novoalignPath}"`
 	if $?.exitstatus != 0
 		puts "Novoalign sequence alignment not performed (status = #{$?.exitstatus})"
 		log.info("Novoalign sequence alignment not performed (status = #{$?.exitstatus})")
@@ -215,12 +218,12 @@ desc "Xnovotonm - Harvest non-base organism reads"
 task :removeHuman => [:alignSequence, sequence.removeNonMappedPath]
 file sequence.removeNonMappedPath => sequence.novoalignPath do
 	puts "RemoveHuman"
-	`#{PROG_DIR}/Xnovotonm.pl #{sequence.novoalignPath}`
+	`"#{PROG_DIR}/Xnovotonm.pl" "#{sequence.novoalignPath}"`
 	if $?.exitstatus != 0
 		puts "Removal of Human mapped reads from novoalign results not performed (status = #{$?.exitstatus})"
 		log.info("Removal of Human mapped reads from novoaign results not performed (status = #{$?.exitstatus})")
 	else
-		log.info(PROG_DIR + "Xnovotonm.pl #{sequence.removeNonMappedPath} - #{`egrep -cv '>' #{sequence.novoalignPath}`} total sequences reduced to #{`egrep -cv '>' #{sequence.removeNonMappedPath}`} after human reads removed.")
+		log.info(PROG_DIR + "Xnovotonm.pl #{sequence.novoalignPath} - #{`egrep -cv '>' "#{sequence.novoalignPath}"`} total sequences reduced to #{`egrep -cv '>' "#{sequence.removeNonMappedPath}"`} after human reads removed.")
 	end
 end
 
@@ -229,10 +232,10 @@ task :removeSpans => [:bowtieIndex, :tophatInstall, :removeHuman, sequence.blast
 file sequence.blast1Path => sequence.removeNonMappedPath do
 	puts "RemoveSpans"
 	sh %{
-		tophat -p #{ncpu} #{setDataTypes.tophat} --output-dir #{ENV['seq']}_tophat_out #{progSettings.bowtieIndex} #{sequence.filePath};
+		tophat -p #{ncpu} #{setDataTypes.tophat} --output-dir #{ENV['seq']}_tophat_out "#{progSettings.bowtieIndex}" "#{sequence.filePath}";
 		samtools view -h -o #{ENV['seq']}_tophat_out/accepted_hits.sam #{ENV['seq']}_tophat_out/accepted_hits.bam;
-		{PROG_DIR}/Xextractspans.pl "#{ENV['seq']}_tophat_out/accepted_hits.sam";
-		{PROG_DIR}/Xfilterspans.pl "#{sequence.removeNonMappedPath}" "#{ENV['seq']}_tophat_out/accepted_hits.sam.spans";
+		"#{PROG_DIR}/Xextractspans.pl" "#{ENV['seq']}_tophat_out/accepted_hits.sam";
+		"#{PROG_DIR}/Xfilterspans.pl" "#{sequence.removeNonMappedPath}" "#{ENV['seq']}_tophat_out/accepted_hits.sam.spans";
 	}
 	if $?.exitstatus != 0
 		puts "Removal of spans from source with Tophat not performed (status = #{$?.exitstatus})"
@@ -246,10 +249,24 @@ file sequence.blast1Path => sequence.removeNonMappedPath do
 end
 
 desc "BLAST - Associate reads with organisms."
-task :localAlignReads => [:blastInstall, :ntInstall, :removeSpans, sequence.megan1Path]
+task :localAlignReads => [:blastInstall, :ntInstall, :removeSpans, :fastaSplitnInstall, sequence.megan1Path]
 file sequence.megan1Path => sequence.blast1Path do
 	puts "localAlignReads"
-	`blastn -db #{progSettings.ntDatabase} -soft_masking true -num_threads #{ncpu} -outfmt #{sequence.blastOutputFormat} -evalue #{sequence.eValue1} -query #{sequence.blast1Path} -out #{sequence.blast1Path}.blast`
+	`SPLITFRAGTEMPLATE='#{sequence.blast1Path}%3.3d' fastasplitn #{sequence.blast1Path} #{(File.size?(sequence.blast1Path).to_f * memInGigs / 1600000000).ceil}`
+	File.copy("#{sequence.blast1Path}001", sequence.blast1Path)
+	main = REXML::Document.new(File.read(sequence.blast1Path))
+	FileList["#{sequence.blast1Path}[0-9][0-9][0-9]"].each { | blastSplits |
+		last if blastSplits =~ /001$/
+		`blastn -db "#{progSettings.ntDatabase}" -soft_masking true -num_threads #{ncpu} -outfmt #{sequence.blastOutputFormat} -evalue #{sequence.eValue1} -query "#{blastSplits}" -out "#{blastSplits}.blast"`
+		addendum = REXML::Document.new(File.read("#{blastSplits}.blast"))
+		addendum.elements.each('BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit'){ |hit|
+			main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit', hit) 
+		}
+		main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat', addendum.elements['BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat']) 
+		File.open(sequence.blast1Path, 'w+') do |blastOutput|
+			main.write(blastOutput)
+		end
+	}
 	if $?.exitstatus != 0
 		puts "BLAST of reads not performed (status = #{$?.exitstatus})"
 		log.info("BLAST of reads not performed (status = #{$?.exitstatus})" )
@@ -263,7 +280,7 @@ desc "MEGAN - Separate reads into taxonomies."
 task :metaGenomeAnalyzeReads => [ :meganInstall, :localAlignReads, sequence.abyssPath]
 file sequence.abyssPath => sequence.megan1Path do
 	puts "metaGenomeAnalyzeReads"
-	`MEGAN +g -x "import blastfile=#{sequence.megan1Path} readfile=#{sequence.blast1Path} meganfile=#{sequence.abyssPath} maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format=#{sequence.imageFileType} file=#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}; quit;"`
+	`MEGAN +g -x "import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}'; quit;"`
 	`MEGAN -f "#{sequence.abyssPath}" -x "#{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;"`
 	if $?.exitstatus != 0
 		puts "MEGAN of BLASTed reads not performed (status = #{$?.exitstatus})"
@@ -279,7 +296,7 @@ task :denovoAssembleCluster => [:abyssInstall, :parallelIteratorInstall, :metaGe
 file FileList["#{sequence.blastPathGlob}"] => FileList["#{sequence.abyssPathGlob}"] do
 	puts "denovoAssemblyCluster"
 	FileList["#{sequence.abyssPathGlob}"].each { | abyssFiles |
-		`#{PROG_DIR}/abyssKmerOptimizer.pl #{abyssFiles} #{sequence.minKmerLength} #{sequence.maxKmerLength} #{setDataTypes.abyss}`
+		`"#{PROG_DIR}/abyssKmerOptimizer.pl" "#{abyssFiles}" #{sequence.minKmerLength} #{sequence.maxKmerLength} #{setDataTypes.abyss}`
 	}
 	if $?.exitstatus != 0
 		puts "DeNovo Assembly not performed (status = #{$?.exitstatus})"
@@ -291,12 +308,11 @@ file FileList["#{sequence.blastPathGlob}"] => FileList["#{sequence.abyssPathGlob
 end
 
 desc "BLAST - Associate contigs with organisms."
-task :localAlignContigs => [:blastInstall, :ntInstall, :denovoAssembleCluster, FileList["#{sequence.megan2PathGlob}"]]
-file FileList["#{sequence.megan2PathGlob}"] => FileList["#{sequence.blastPathGlob}"] do
+task :localAlignContigs => [:blastInstall, :ntInstall, :denovoAssembleCluster, FileList["#{sequence.megan2Path}"]]
+file sequence.megan2Path => FileList["#{sequence.blastPathGlob}"] do
 	puts "localAlignContigs"
-	FileList["#{sequence.blastPathGlob}"].each { | blastFiles |
-		`blastn -db #{progSettings.ntDatabase} -soft_masking true -num_threads #{ncpu} -outfmt #{sequence.blastOutputFormat} -evalue #{sequence.eValue2} -query #{blastFiles} -out #{blastFiles}.blast`
-	}
+	`cat #{sequence.blastPathGlob} >> #{sequence.blast2Path}` # combine FASTA files
+	`blastn -db "#{progSettings.ntDatabase}" -soft_masking true -num_threads #{ncpu} -outfmt #{sequence.blastOutputFormat} -evalue #{sequence.eValue2} -query "#{sequence.blast2Path}" -out "#{sequence.blast2Path}.blast"`
 	if $?.exitstatus != 0
 		puts "BLAST of contigs not performed (status = #{$?.exitstatus})" 
 		log.info("BLAST of contigs not performed (status = #{$?.exitstatus})" )
@@ -307,16 +323,11 @@ file FileList["#{sequence.megan2PathGlob}"] => FileList["#{sequence.blastPathGlo
 end
 
 desc "MEGAN - Separate contigs into taxonomies."
-task :metaGenomeAnalyzeContigs => [ :meganInstall, :localAlignContigs, FileList["#{sequence.pipeEndGlob}"]]
-file FileList["#{sequence.pipeEndGlob}"] => FileList["#{sequence.megan2PathGlob}"] do
+task :metaGenomeAnalyzeContigs => [ :meganInstall, :localAlignContigs, FileList["#{sequence.pipeEndPath}"]]
+file sequence.pipeEndPath => sequence.megan2Path do
 	puts "metaGenomeAnalyzeContigs"
-	comparisonString = 'compare mode=absolute'
-	FileList["#{sequence.blastPathGlob}"].each { | blastFiles |
-		comparisonString += " meganfile=#{sequence.megan2PathGlob}"
-		`MEGAN +g -x "import blastfile=#{sequence.megan2PathGlob} readfile=#{sequence.blastPathGlob} meganfile=#{pipeEndGlob} maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format=#{sequence.imageFileType} file=#{megan2PathGlob + '.' + sequence.imageFileType.downcase}; quit;"`
-	}
-	`MEGAN +g -x "#{comparisonString}"; save meganfile=#{seq}.rma`
-	`MEGAN -f "#{seq}.rma"`
+	`MEGAN +g -x "import blastfile='#{sequence.megan2Path}' readfile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{megan2Path + '.' + sequence.imageFileType.downcase}'; quit;"`
+	`MEGAN -f "#{sequence.pipeEndPath}.rma"`
 	if $?.exitstatus != 0
 		puts "MEGAN of BLASTed contigs not performed (status = #{$?.exitstatus})"
 		log.info("MEGAN of BLASTed contigs not performed (status = #{$?.exitstatus})")
@@ -362,7 +373,7 @@ task :novoIndex => [:hgInstall, :novoalignInstall] do
 		progSettings.novoIndex=findFile("*hg*.ndx", locate)
 		if progSettings.novoIndex.to_s.empty?
 			progSettings.novoIndex="#{progSettings.humanGenomeDatabase.to_s}/hgChrAll.ndx"
-			`novoindex #{progSettings.novoIndex.to_s} #{progSettings.humanGenomeDatabase.to_s}/chr[0-9XY].fa #{progSettings.humanGenomeDatabase.to_s}/chr[0-9][0-9].fa`
+			`novoindex "#{progSettings.novoIndex.to_s}" "#{progSettings.humanGenomeDatabase.to_s}/chr[0-9XY].fa" "#{progSettings.humanGenomeDatabase.to_s}/chr[0-9][0-9].fa"`
 		end
 	end
 end
@@ -380,8 +391,8 @@ task :bowtieIndex => [:hgInstall, :bowtieInstall] do
 			end
 			resourceFiles.chomp!(',')
 			sh %{
-				cd #{progSettings.humanGenomeDatabase.to_s};
-				bowtie-build #{resourceFiles} #{progSettings.bowtieIndex.to_s};
+				cd "#{progSettings.humanGenomeDatabase.to_s}";
+				bowtie-build "#{resourceFiles}" "#{progSettings.bowtieIndex.to_s}";
 				`echo "export BOWTIEINDEX=#{progSettings.bowtieIndex.to_s}" >> ~/.#{shell}rc;`;
 			}
 		end
@@ -613,7 +624,7 @@ task :meganInstall do
 			rm #{megan};
 		}
 		megan = `which MEGAN`.chomp
-		`ln -s #{findFile(MEGAN)} /usr/bin` if megan.empty?
+		`ln -s "#{findFile(MEGAN)}" /usr/bin` if megan.empty?
 		megan = `which MEGAN`.chomp
 		if (arch == 64) # If CPU architecture is 64-bit, allow for more than 2GB of RAM and force 64-bit Java.
 			text = File.new(megan).read.gsub(/"\$prg_dir\/\$progname" "-server" "-Xms\d+." "-Xmx\d+."/, "\"$prg_dir/$progname\" \"-server\" \"-d64\" \"-Xms#{memInGigs}G\" \"-Xmx#{memInGigs}G\"")
@@ -627,6 +638,27 @@ task :parallelIteratorInstall do
 	`perl -MParallel::Iterator -e 1`
 	if $?.exitstatus != 0
 		`perl -MCPAN -e 'install Parallel::Iterator'`
+	end
+end
+
+desc "Install latest version of XML::Merge for perl."
+task :xmlMergeInstall do
+	`perl -MXML::Merge -e 1`
+	if $?.exitstatus != 0
+		`perl -MCPAN -e 'install Devel::Symdump`
+		`perl -MCPAN -e 'install Test::Pod`
+		`perl -MCPAN -e 'install Test::Pod::Coverage`
+		`perl -MCPAN -e 'install Math::BaseCnv`
+		`perl -MCPAN -e 'install XML::Tidy`
+		`perl -MCPAN -e 'install XML::Merge'`
+	end
+end
+
+
+desc "Install FASTA file splitter."
+task :fastaSplitnInstall do
+	if !command? "fastasplitn"
+		`gcc -o /usr/bin/fastasplitn fastasplitn.c`
 	end
 end
 
@@ -649,6 +681,7 @@ task :install do
 	Rake::Task[:ntInstall].invoke
 	Rake::Task[:meganInstall].invoke
 	Rake::Task[:parallelIteratorInstall].invoke
+	Rake::Task[:fastaSplitnInstall].invoke
 end
 
 desc "Automatically saving any settings changes which may have been made"
