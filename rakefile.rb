@@ -252,19 +252,22 @@ desc "BLAST - Associate reads with organisms."
 task :localAlignReads => [:blastInstall, :ntInstall, :removeSpans, :fastaSplitnInstall, sequence.megan1Path]
 file sequence.megan1Path => sequence.blast1Path do
 	puts "localAlignReads"
+	puts "SPLITFRAGTEMPLATE='#{sequence.blast1Path}%3.3d' fastasplitn #{sequence.blast1Path} #{(File.size?(sequence.blast1Path).to_f * memInGigs / 1600000000).ceil}"
 	`SPLITFRAGTEMPLATE='#{sequence.blast1Path}%3.3d' fastasplitn #{sequence.blast1Path} #{(File.size?(sequence.blast1Path).to_f * memInGigs / 1600000000).ceil}`
-	File.copy("#{sequence.blast1Path}001", sequence.blast1Path)
 	main = REXML::Document.new(File.read(sequence.blast1Path))
-	FileList["#{sequence.blast1Path}[0-9][0-9][0-9]"].each { | blastSplits |
-		last if blastSplits =~ /001$/
-		`blastn -db "#{progSettings.ntDatabase}" -soft_masking true -num_threads #{ncpu} -outfmt #{sequence.blastOutputFormat} -evalue #{sequence.eValue1} -query "#{blastSplits}" -out "#{blastSplits}.blast"`
-		addendum = REXML::Document.new(File.read("#{blastSplits}.blast"))
-		addendum.elements.each('BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit'){ |hit|
-			main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit', hit) 
-		}
-		main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat', addendum.elements['BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat']) 
-		File.open(sequence.blast1Path, 'w+') do |blastOutput|
-			main.write(blastOutput)
+	FileList["#{sequence.blast1Path}"].each { | blastSplits |
+		`blastn -db #{progSettings.ntDatabase} -soft_masking true -num_threads #{ncpu} -outfmt #{sequence.blastOutputFormat} -evalue #{sequence.eValue1} -query "#{blastSplits}" -out "#{blastSplits}.blast"`
+		if !(blastSplits =~ /001$/) or !(blastSplits.eql?(sequence.blast1Path))
+			addendum = REXML::Document.new(File.read("#{blastSplits}.blast"))
+			addendum.elements.each('BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit'){ |hit|
+				main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit', hit) 
+			}
+			main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat', addendum.elements['BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat']) 
+			File.open(sequence.blast1Path, 'w+') do |blastOutput|
+				main.write(blastOutput)
+			end
+		else
+			File.copy("#{sequence.blast1Path}001.blast", "#{sequence.blast1Path}.blast")
 		end
 	}
 	if $?.exitstatus != 0
@@ -308,7 +311,7 @@ file FileList["#{sequence.blastPathGlob}"] => FileList["#{sequence.abyssPathGlob
 end
 
 desc "BLAST - Associate contigs with organisms."
-task :localAlignContigs => [:blastInstall, :ntInstall, :denovoAssembleCluster, FileList["#{sequence.megan2Path}"]]
+task :localAlignContigs => [:blastInstall, :ntInstall, :denovoAssembleCluster, sequence.megan2Path]
 file sequence.megan2Path => FileList["#{sequence.blastPathGlob}"] do
 	puts "localAlignContigs"
 	`cat #{sequence.blastPathGlob} >> #{sequence.blast2Path}` # combine FASTA files
