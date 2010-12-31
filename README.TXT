@@ -1,4 +1,4 @@
-V0.30
+V0.32
 
 PARSES: A Pipeline for Analysis of RNA-Sequencing Exogenous Sequences
 

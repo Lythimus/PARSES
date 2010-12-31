@@ -11,13 +11,21 @@ require "ftools"
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = "PARSES"
-VER = "0.30"
+VER = "0.32"
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
 def command?(name)
   `which #{name}`
   $?.success?
+end
+# Determine if installing an application
+installMode = false
+for arg in ARGV do
+	if arg =~ /install/i
+		installMode = true
+		break
+	end
 end
 
 # Follow redirecting links. Used to obtain latest versions of files.
@@ -43,8 +51,8 @@ end
 
 ### GATHER SEQUENCE RUN INFORMATION FROM PREVIOUS RUNS
 seqName = "#{ENV['seq']}".chomp
-abort "Must specify a sequence to analyze via the seq= option" if seqName.empty?
-abort "Perl must be installed." if !command? "perl"
+abort "Must specify a sequence to analyze via the seq= option" if seqName.empty? and !installMode
+abort "Perl must be installed." if !command? "perl" and !installMode
 abort "gcc must be installed" if !command? "gcc"
 seqFileName = "#{ENV['file']}".chomp
 dataType = "#{ENV['type']}".chomp
@@ -134,7 +142,7 @@ if File::exists?(".#{seqName}") #Sequence has been run before
 		sequence.dataType = dataType
 	end
 elsif seqFileName.empty? or dataType.empty? #Sequence has not been run and a file or data type is not specified
-	abort "Must specify a file of data to analyze for the first execution of the process as well as it's data type via the file= and type= options"
+	abort "Must specify a file of data to analyze for the first execution of the process as well as it's data type via the file= and type= options" if !installMode
 else #Sequence has not been run, but file and file type are specified
 	seqFile = File.open(".#{seqName}", "a")
 	sequence = Sequence.new(seqFileName, dataType)
@@ -189,8 +197,8 @@ memInGigs = -1
 case os
 when OS::OSX
 	ncpu = `sysctl -n hw.ncpu`.chomp.to_i
-	"#{`/usr/sbin/system_profiler SPHardwareDataType | grep Memory`}" =~ /Memory:\w+(\d+).*/;
-	memInGigs = $1
+	"#{`/usr/sbin/system_profiler SPHardwareDataType | grep Memory`}" =~ /Memory:\s+(\d+)\s*GB/;
+	memInGigs = $1.chomp.to_i
 when OS::LINUX
 	`cat /proc/cpuinfo | grep -G processor.*:.* | tail -n 1` =~ /processor.*:.*(\d+)/
 	ncpu = $1.chomp.to_i + 1
@@ -252,22 +260,19 @@ desc "BLAST - Associate reads with organisms."
 task :localAlignReads => [:blastInstall, :ntInstall, :removeSpans, :fastaSplitnInstall, sequence.megan1Path]
 file sequence.megan1Path => sequence.blast1Path do
 	puts "localAlignReads"
-	puts "SPLITFRAGTEMPLATE='#{sequence.blast1Path}%3.3d' fastasplitn #{sequence.blast1Path} #{(File.size?(sequence.blast1Path).to_f * memInGigs / 1600000000).ceil}"
 	`SPLITFRAGTEMPLATE='#{sequence.blast1Path}%3.3d' fastasplitn #{sequence.blast1Path} #{(File.size?(sequence.blast1Path).to_f * memInGigs / 1600000000).ceil}`
-	main = REXML::Document.new(File.read(sequence.blast1Path))
-	FileList["#{sequence.blast1Path}"].each { | blastSplits |
-		`blastn -db #{progSettings.ntDatabase} -soft_masking true -num_threads #{ncpu} -outfmt #{sequence.blastOutputFormat} -evalue #{sequence.eValue1} -query "#{blastSplits}" -out "#{blastSplits}.blast"`
-		if !(blastSplits =~ /001$/) or !(blastSplits.eql?(sequence.blast1Path))
-			addendum = REXML::Document.new(File.read("#{blastSplits}.blast"))
-			addendum.elements.each('BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit'){ |hit|
-				main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit', hit) 
-			}
-			main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat', addendum.elements['BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat']) 
-			File.open(sequence.blast1Path, 'w+') do |blastOutput|
-				main.write(blastOutput)
+	main = REXML::Document.new File.read(sequence.blast1Path)
+	FileList["#{sequence.blast1Path}[0-9][0-9][0-9]"].each { | blastSplits |
+		`blastn -db #{progSettings.ntDatabase} -soft_masking true -num_threads #{ncpu} -outfmt #{sequence.blastOutputFormat} -evalue #{sequence.eValue1} -query "#{blastSplits}" -out "#{blastSplits}.blast"` if (blastSplits != sequence.blast1Path)
+		if !(blastSplits =~ /001$/) and (blastSplits != sequence.blast1Path)
+			addendum = REXML::Document.new File.read("#{blastSplits}.blast")
+			addendum.elements.each('BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit') do |hit|
+				main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit', hit)
 			end
+			main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat/Statistics', addendum.elements['BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat/Statistics'])
+			main.write(File.open(sequence.blast1Path, 'w'))
 		else
-			File.copy("#{sequence.blast1Path}001.blast", "#{sequence.blast1Path}.blast")
+			File.copy("#{sequence.blast1Path}001.blast", "#{sequence.blast1Path}.blast") if blastSplits =~ /001$/
 		end
 	}
 	if $?.exitstatus != 0
@@ -283,7 +288,7 @@ desc "MEGAN - Separate reads into taxonomies."
 task :metaGenomeAnalyzeReads => [ :meganInstall, :localAlignReads, sequence.abyssPath]
 file sequence.abyssPath => sequence.megan1Path do
 	puts "metaGenomeAnalyzeReads"
-	`MEGAN +g -x "import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}'; quit;"`
+	`MEGAN +g -x "import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;"`
 	`MEGAN -f "#{sequence.abyssPath}" -x "#{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;"`
 	if $?.exitstatus != 0
 		puts "MEGAN of BLASTed reads not performed (status = #{$?.exitstatus})"
@@ -312,10 +317,26 @@ end
 
 desc "BLAST - Associate contigs with organisms."
 task :localAlignContigs => [:blastInstall, :ntInstall, :denovoAssembleCluster, sequence.megan2Path]
-file sequence.megan2Path => FileList["#{sequence.blastPathGlob}"] do
+file sequence.megan2Path => sequence.blast2Path do
 	puts "localAlignContigs"
 	`cat #{sequence.blastPathGlob} >> #{sequence.blast2Path}` # combine FASTA files
-	`blastn -db "#{progSettings.ntDatabase}" -soft_masking true -num_threads #{ncpu} -outfmt #{sequence.blastOutputFormat} -evalue #{sequence.eValue2} -query "#{sequence.blast2Path}" -out "#{sequence.blast2Path}.blast"`
+	`SPLITFRAGTEMPLATE='#{sequence.blast2Path}%3.3d' fastasplitn #{sequence.blast2Path} #{(File.size?(sequence.blast2Path).to_f * memInGigs / 1600000000).ceil}`
+	main = REXML::Document.new(File.read(sequence.blast2Path))
+	FileList["#{sequence.blast2Path}"].each { | blastSplits |
+		`blastn -db "#{progSettings.ntDatabase}" -soft_masking true -num_threads #{ncpu} -outfmt #{sequence.blastOutputFormat} -evalue #{sequence.eValue2} -query "#{blastSplits}" -out "#{blastSplits}.blast"`
+		if !(blastSplits =~ /001$/) or !(blastSplits.eql?(sequence.blast1Path))
+			addendum = REXML::Document.new(File.read("#{blastSplits}.blast"))
+			addendum.elements.each('BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit'){ |hit|
+				main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_hits/Hit', hit) 
+			}
+			main.root.insert_after('/BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat', addendum.elements['BlastOutput/BlastOutput_iterations/Iteration/Iteration_stat']) 
+			File.open(sequence.blast2Path, 'w+') do |blastOutput|
+				main.write(blastOutput)
+			end
+		else
+			File.copy("#{sequence.blast2Path}001.blast", "#{sequence.blast2Path}.blast")
+		end
+	}
 	if $?.exitstatus != 0
 		puts "BLAST of contigs not performed (status = #{$?.exitstatus})" 
 		log.info("BLAST of contigs not performed (status = #{$?.exitstatus})" )
@@ -326,10 +347,10 @@ file sequence.megan2Path => FileList["#{sequence.blastPathGlob}"] do
 end
 
 desc "MEGAN - Separate contigs into taxonomies."
-task :metaGenomeAnalyzeContigs => [ :meganInstall, :localAlignContigs, FileList["#{sequence.pipeEndPath}"]]
+task :metaGenomeAnalyzeContigs => [ :meganInstall, :localAlignContigs, sequence.pipeEndPath]
 file sequence.pipeEndPath => sequence.megan2Path do
 	puts "metaGenomeAnalyzeContigs"
-	`MEGAN +g -x "import blastfile='#{sequence.megan2Path}' readfile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{megan2Path + '.' + sequence.imageFileType.downcase}'; quit;"`
+	`MEGAN +g -x "import blastfile='#{sequence.megan2Path}' readfile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{megan2Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;"`
 	`MEGAN -f "#{sequence.pipeEndPath}.rma"`
 	if $?.exitstatus != 0
 		puts "MEGAN of BLASTed contigs not performed (status = #{$?.exitstatus})"
@@ -644,24 +665,10 @@ task :parallelIteratorInstall do
 	end
 end
 
-desc "Install latest version of XML::Merge for perl."
-task :xmlMergeInstall do
-	`perl -MXML::Merge -e 1`
-	if $?.exitstatus != 0
-		`perl -MCPAN -e 'install Devel::Symdump`
-		`perl -MCPAN -e 'install Test::Pod`
-		`perl -MCPAN -e 'install Test::Pod::Coverage`
-		`perl -MCPAN -e 'install Math::BaseCnv`
-		`perl -MCPAN -e 'install XML::Tidy`
-		`perl -MCPAN -e 'install XML::Merge'`
-	end
-end
-
-
 desc "Install FASTA file splitter."
 task :fastaSplitnInstall do
 	if !command? "fastasplitn"
-		`gcc -o /usr/bin/fastasplitn fastasplitn.c`
+		`gcc -o /usr/bin/fastasplitn #{PROG_DIR}/fastasplitn.c`
 	end
 end
 

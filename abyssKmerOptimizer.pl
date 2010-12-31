@@ -16,7 +16,7 @@ use File::Basename;
 # ARGV0 = Regex to query files paths.
 # ARGV1 = Minimum kmer to attempt.
 # ARGV2 = Maximum kmer to attempt.
-# ARGV3 = Data Type parameter
+# ARGV3 = Data Type parameter. Either --illumina-quality or --standard-quality
 #
 ###
 
