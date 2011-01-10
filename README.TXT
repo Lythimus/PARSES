@@ -1,4 +1,4 @@
-V0.32
+V0.33
 
 PARSES: A Pipeline for Analysis of RNA-Sequencing Exogenous Sequences
 
@@ -15,8 +15,8 @@ Step by step instructions for OS X (exclude `backquotes` when typing a command):
 10. Open a terminal in ~/bin.
 11. Execute `chmod +x *.pl`
 12. Change directory to directory containing FASTQ sequence (you may want to make a backup of your data, my program shouldn't do anything to it but I would hate to be responsible for such a thing.). For instance if the data is contained in /usr/share execute `cd /usr/share`
-13. Execute `sudo rake -f ~/bin/rakefile.rb seq=mysequence file=reads.fastq type=solexa install`. Please note your sequence name should not have any spaces. Keep all of the default settings for the MEGAN install. If any of the installations fail manually install them.
-14. Execute `rake -f ~/bin/rakefile.rb seq=mysequence file=reads.fastq type=solexa`.
+13. Execute `sudo rake -f ~/bin/rakefile.rb install`. Keep all of the default settings for the MEGAN install. If any of the installations fail manually install them.
+14. Execute `rake -f ~/bin/rakefile.rb seq=mysequence file=reads.fastq type=solexa`. Please note your sequence name should not have any spaces. 
 15. Register MEGAN if you have not yet. The program should open and you can follow the instructions to get emailed a key.
 16. Update the LCA Paramaters by selecting Options->Change LCA Parameters in MEGAN.
 17. Right click the nodes of each of the taxonomies individually you are interested in and select 'Extract Reads by Taxa' for each. Keep the default name. Exit MEGAN.
@@ -36,7 +36,7 @@ Xnovotonm.pl marked as executable in same folder as rakefile
 Working directory is the directory in which the fasta sequence file is contained.
 
 If you want to get all applications used in the pipeline installed upfront example:
-sudo rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta type=illumina1.3 install
+sudo rake -f /rake/file/location install
 
 First run example:
 rake -f /rake/file/location seq=NameYouGiveToYourSequence file=YourSequenceFileName.fasta type=illumina1.3
