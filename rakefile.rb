@@ -224,7 +224,7 @@ def findFile(filename, locate)
 	return path.to_s
 end
 
-def safeExec(command, log, errorMessage)
+def safeExec(command, log, sequence, errorMessage)
 	results=`{ /usr/bin/time #{command} } 2> .time`
 	if $?.exitstatus != 0
 		puts "#{errorMessage} (status = #{$?.exitstatus})"
@@ -232,7 +232,7 @@ def safeExec(command, log, errorMessage)
 	else
 		File.open(".time").first =~ /(\d+).\d+ real/
 		sequence.executionTime = sequence.executionTime + $1.to_i
-		log.info("#{command} execution time: #{Time.at($1).gmtime.strftime('%R:%S')}")
+		log.info("#{command} execution time: #{Time.at($1.to_i).gmtime.strftime('%R:%S')}")
 	end
 	return $?.exitstatus, results
 end
@@ -294,7 +294,7 @@ task :alignSequence => [:novoalignInstall, :hgInstall, :novoIndex]
 file sequence.novoalignPath => sequence.filePath do
 	puts 'Sequence Alignment'
 	seqFileName = sequence.filePath if forceFile != 'true'
-	exitStatus = safeExec("novoalign -d \"#{progSettings.novoIndex}\" #{setDataTypes.novoalign} -f \"#{seqFileName}\" > \"#{sequence.novoalignPath}\";", log,
+	exitStatus = safeExec("novoalign -d \"#{progSettings.novoIndex}\" #{setDataTypes.novoalign} -f \"#{seqFileName}\" > \"#{sequence.novoalignPath}\";", log, sequence,
 			'Novoalign sequence alignment not performed')
 	if exitStatus == 0
 		readsLeft=`egrep -c '@' "#{sequence.novoalignPath}"`
@@ -307,7 +307,7 @@ task :removeHuman => :alignSequence
 file sequence.removeNonMappedPath => sequence.novoalignPath do
 	puts 'RemoveHuman'
 	seqFileName = sequence.novoalignPath if forceFile != 'true'
-	exitStatus = safeExec("\"#{PROG_DIR}/Xnovotonm.pl\" \"#{seqFileName}\";", log,
+	exitStatus = safeExec("\"#{PROG_DIR}/Xnovotonm.pl\" \"#{seqFileName}\";", log, sequence,
 			'Removal of Human mapped reads from novoalign results not performed')
 	if exitStatus == 0
 		readsLeft=`egrep -c '^[ACTGN]' "#{sequence.removeNonMappedPath}"`
@@ -320,13 +320,13 @@ task :removeSpans => [:bowtieIndex, :tophatInstall, :removeHuman]
 file sequence.blast1Path => sequence.removeNonMappedPath do
 	puts 'RemoveSpans'
 	## DIDN'T IMPLEMENT forceFile BECAUSE TOO COMPLICATED
-	safeExec("tophat -p #{ncpu} #{setDataTypes.tophat} --output-dir \"#{ENV['seq']}_tophat_out\" \"#{progSettings.bowtieIndex}\" \"#{sequence.filePath}\";", log,
+	safeExec("tophat -p #{ncpu} #{setDataTypes.tophat} --output-dir \"#{ENV['seq']}_tophat_out\" \"#{progSettings.bowtieIndex}\" \"#{sequence.filePath}\";", log, sequence,
 			'TopHat sequence alignment not performed')
-	safeExec("samtools view -h -o \"#{ENV['seq']}_tophat_out/accepted_hits.sam\" \"#{ENV['seq']}_tophat_out/accepted_hits.bam\";", log,
+	safeExec("samtools view -h -o \"#{ENV['seq']}_tophat_out/accepted_hits.sam\" \"#{ENV['seq']}_tophat_out/accepted_hits.bam\";", log, sequence,
 			'Samtools conversion not performed')
-	safeExec("\"#{PROG_DIR}/Xextractspans.pl\" \"#{ENV['seq']}_tophat_out/accepted_hits.sam\";", log,
+	safeExec("\"#{PROG_DIR}/Xextractspans.pl\" \"#{ENV['seq']}_tophat_out/accepted_hits.sam\";", log, sequence,
 			'Spanning region extraction not performed')
-	exitStatus = safeExec("\"#{PROG_DIR}/Xfilterspans.pl\" \"#{sequence.removeNonMappedPath}\" \"#{ENV['seq']}_tophat_out/accepted_hits.sam.spans\";", log,
+	exitStatus = safeExec("\"#{PROG_DIR}/Xfilterspans.pl\" \"#{sequence.removeNonMappedPath}\" \"#{ENV['seq']}_tophat_out/accepted_hits.sam.spans\";", log, sequence,
 			'Filter of spanning regions not performed')
 	if exitStatus == 0
 		readsLeft=`egrep -cv '>' "#{sequence.blast1Path}"`
@@ -347,7 +347,8 @@ file sequence.megan1Path => sequence.blast1Path do
 	fileCount = pieceSize
 	FileList["#{seqFileName}.*"].each { | blastPiece |
 		if fileCount > 0
-			safeExec("blastn -db \"#{progSettings.ntDatabase}\" -soft_masking true #{dust} -num_threads #{ncpu} -evalue #{sequence.eValue1} -outfmt #{sequence.blastOutputFormat} -query \"#{blastPiece}\" -out \"#{blastPiece}.blast\" &", log, 'BLAST of reads not performed')
+			safeExec("blastn -db \"#{progSettings.ntDatabase}\" -soft_masking true #{dust} -num_threads #{ncpu} -evalue #{sequence.eValue1} -outfmt #{sequence.blastOutputFormat} -query \"#{blastPiece}\" -out \"#{blastPiece}.blast\" &", log, sequence,
+					'BLAST of reads not performed')
 			fileCount = fileCount - 1
 		else
 			fileCount = pieceSize
@@ -365,14 +366,14 @@ file sequence.abyssPath => sequence.megan1Path do
 	## DIDN'T IMPLEMENT forceFile BECAUSE TOO COMPLICATED
 	`MEGAN -V` =~ /(4.0)/
 	if ($_.to_i < 4.0)
-		safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log,
+		safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
 			'MEGAN processing of BLASTed reads not performed')
-		exitStatus, results = safeExec("MEGAN -f \"#{sequence.abyssPath}\" -x \"#{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;\";", log,
+		exitStatus, results = safeExec("MEGAN -f \"#{sequence.abyssPath}\" -x \"#{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;\";", log, sequence,
 			'Opening MEGAN file not performed')
 	else
-		safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log,
+		safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
 			'MEGAN processing of BLASTed reads not performed')
-		exitStatus, results = safeExec("MEGAN -f \"#{sequence.abyssPath}\" -x \"set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;\";", log,
+		exitStatus, results = safeExec("MEGAN -f \"#{sequence.abyssPath}\" -x \"set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;\";", log, sequence,
 			'Opening MEGAN file not performed')
 	end
 	if exitStatus == 0
@@ -390,7 +391,7 @@ file sequence.blast2Path => sequence.abyssPathGlob do
 	puts 'denovoAssemblyCluster'
 	seqFileName = sequence.abyssPathGlob if forceFile != 'true'
 	FileList["#{seqFileName}"].each { | abyssFiles |
-		exitStatus = safeExec("\"#{PROG_DIR}/abyssKmerOptimizer.pl\" \"#{abyssFiles}\" #{sequence.minKmerLength} #{sequence.maxKmerLength} #{setDataTypes.abyss};", log,
+		exitStatus = safeExec("\"#{PROG_DIR}/abyssKmerOptimizer.pl\" \"#{abyssFiles}\" #{sequence.minKmerLength} #{sequence.maxKmerLength} #{setDataTypes.abyss};", log, sequence,
 			'ABySS not performed')
 	}
 	`cat "#{sequence.blastPathGlob}" > "#{sequence.blast2Path}"` if forceFile != 'true'
@@ -409,7 +410,7 @@ task :localAlignContigs => [:blastInstall, :ntInstall, :denovoAssembleCluster]
 file sequence.megan2Path => sequence.blast2Path do
 	puts 'localAlignContigs'
 	seqFileName = sequence.blast2Path if forceFile != 'true'
-	safeExec("blastn -db \"#{progSettings.ntDatabase}\" -soft_masking true -num_threads #{ncpu} -evalue #{sequence.eValue2} -outfmt #{sequence.blastOutputFormat} -query \"#{seqFileName}\" -out \"#{sequence.megan2Path}\";", log,
+	safeExec("blastn -db \"#{progSettings.ntDatabase}\" -soft_masking true -num_threads #{ncpu} -evalue #{sequence.eValue2} -outfmt #{sequence.blastOutputFormat} -query \"#{seqFileName}\" -out \"#{sequence.megan2Path}\";", log, sequence,
 			'BLAST of contigs not performed')
 end
 
@@ -419,9 +420,9 @@ file sequence.pipeEndPath => sequence.megan2Path do
 	## DIDN'T IMPLEMENT forceFile BECAUSE TOO COMPLICATED
 	puts 'metaGenomeAnalyzeContigs'
 	`MEGAN -f "#{sequence.pipeEndPath}.rma"`
-	safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan2Path}' readfile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan2Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log,
+	safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan2Path}' readfile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan2Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
 			'MEGAN processing of BLASTed contigs not performed')
-	exitStatus, results = safeExec("MEGAN -f \"#{sequence.pipeEndPath}.rma\";", log,
+	exitStatus, results = safeExec("MEGAN -f \"#{sequence.pipeEndPath}.rma\";", log, sequence,
 			'Opening MEGAN file not performed')
 	if exitStatus == 0
 		totalReads = $_ if (results =~ /Total reads:\s*(\d+)/).chomp.to_i
