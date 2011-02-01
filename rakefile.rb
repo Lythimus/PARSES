@@ -10,7 +10,7 @@ require 'csv'
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = 'PARSES'
-VER = '0.38'
+VER = '0.39'
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
@@ -76,7 +76,7 @@ class Settings
 end
 
 if File::exists?(File.expand_path("~/.#{PROG_NAME}")) #Program has been executed before
-	progSettings = YAML.load_file(File.expand_path("~/.#{PROG_NAME}"))
+	progSettings = YAML.load(File.open(File.expand_path("~/.#{PROG_NAME}")))
 else
 	progSettings = Settings.new
 end
@@ -116,7 +116,7 @@ class Sequence
 		@blast1Path="#{removeNonMappedPath}.nospans"
 		@megan1Path="#{blast1Path}.blast"
 		@abyssPath="#{megan1Path}.megan.rma"
-		@abyssPathGlob='reads-*.fasta'
+		@abyssPathGlob="reads-*.fasta"
 		@blastPathGlob="#{abyssPathGlob}.*.kmer.contigs.fa.kmerOptimized.fa"
 		@blast2Path="#{abyssPath}.kmerOptimized.fa"
 		@megan2Path="#{blast2Path}.blast"
@@ -172,7 +172,7 @@ class DataType
 end
 if (!installMode)
 	if File::exists?(".#{seqName}") #Sequence has been run before
-		sequence = YAML.load_file(".#{seqName}")
+		sequence = YAML.load(File.open(".#{seqName}"))
 		#Was a new file or file type entered from commandline?
 		if seqFileName.empty?
 			seqFileName = sequence.filePath
@@ -200,19 +200,6 @@ end
 # Clean and clobber are not functioning at the moment
 #CLEAN.include(sequence.filePath + '\S*')
 #CLOBBER.include(sequence.filePath + '\S*')
-
-#Allow for pipeline override, chopping off the front of the pipeline
-if truncate != 'true'
-	task :alignSequence => sequence.novoalignPath if !File.exists?(sequence.novoalignPath)
-	task :removeHuman => sequence.removeNonMappedPath if !File.exists?(sequence.removeNonMappedPath)
-	task :removeSpans => sequence.blast1Path if !File.exists?(sequence.blast1Path)
-	task :localAlignReads => sequence.megan1Path if !File.exists?(sequence.megan1Path)
-	task :metaGenomeAnalyzeReads => sequence.abyssPath if !File.exists?(sequence.abyssPath)
-	task :denovoAssembleCluster => FileList["#{sequence.blastPathGlob}"] if FileList["#{sequence.blastPathGlob}"].to_s.chomp.empty?
-	task :localAlignContigs => sequence.megan2Path if !File.exists?(sequence.megan2Path)
-	task :metaGenomeAnalyzeContigs => sequence.pipeEndPath if !File.exists?(sequence.pipeEndPath)
-end
-
 
 ### GATHER SYSTEM INFORMATION
 
@@ -810,6 +797,18 @@ task :reserialize do
 	# Reserialize object in case any changes have been made
 	YAML.dump(sequence, File.open(".#{seqName}", 'w')) if !installMode
 	YAML.dump(progSettings, File.open(File.expand_path("~/.#{PROG_NAME}"), 'w'))
+end
+
+#Allow for pipeline override, chopping off the front of the pipeline
+if truncate != 'true'
+	task :alignSequence => sequence.novoalignPath if !File.exists?(sequence.novoalignPath)
+	task :removeHuman => sequence.removeNonMappedPath if !File.exists?(sequence.removeNonMappedPath)
+	task :removeSpans => sequence.blast1Path if !File.exists?(sequence.blast1Path)
+	task :localAlignReads => sequence.megan1Path if !File.exists?(sequence.megan1Path)
+	task :metaGenomeAnalyzeReads => sequence.abyssPath if !File.exists?(sequence.abyssPath)
+	task :denovoAssembleCluster => sequence.blast2Path if !File.exists?(sequence.blast2Path)
+	task :localAlignContigs => sequence.megan2Path if !File.exists?(sequence.megan2Path)
+	task :metaGenomeAnalyzeContigs => sequence.pipeEndPath if !File.exists?(sequence.pipeEndPath)
 end
 
 # invoke reserialize after all tasks have been executed
