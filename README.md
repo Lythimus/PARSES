@@ -1,4 +1,4 @@
-#PARSES V0.37
+#PARSES V0.38
 For more information see [wiki](https://github.com/Lythimus/PARSES/wiki)
 
 #Requirements
@@ -22,10 +22,11 @@ PARSES's system requirements are directly dependent on the size of the data set 
 * [Rake](http://rake.rubyforge.org)
 * abyssKmerOptimizer.pl marked as executable in same folder as rakefile
 * fac.pl marked as executable in same folder as rakefile
+* addTaxon.pl marked as executable in same folder as rakefile
+* parallelBlast.sh marked as executable in same folder as rakefile
 * Xextractspans.pl marked as executable in same folder as rakefile
 * Xfilterspans.pl marked as executable in same folder as rakefile
 * Xnovotonm.pl marked as executable in same folder as rakefile
-
 ___
 
 #Installation

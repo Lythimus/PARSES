@@ -10,7 +10,7 @@ require 'csv'
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = 'PARSES'
-VER = '0.37'
+VER = '0.38'
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
@@ -193,7 +193,7 @@ if (!installMode)
 	setDataTypes = DataType.new(sequence.dataType)
 
 	log = Logger.new("#{seqName}.log")
-	log.info("Begin run for seq=#{seqName} file=#{seqFileName} type=#{dataType} task=#{ARGV[0]}")
+	log.info("Begin run for seq=#{seqName} file=#{seqFileName} type=#{dataType} task=#{ARGV[-1]}")
 else
 	sequence = Sequence.new('~', 'solexa')
 end
@@ -335,28 +335,30 @@ file sequence.blast1Path => sequence.removeNonMappedPath do
 end
 
 desc 'BLAST - Associate reads with organisms.'
-task :localAlignReads => [:blastInstall, :ntInstall, :removeSpans, :fastaSplitnInstall]
+task :localAlignReads => [:blastInstall, :ntInstall, :removeSpans]
 file sequence.megan1Path => sequence.blast1Path do
 	puts 'localAlignReads'
 	dust = "-dust no" if sequence.readLength < 50 # Dust filtering should be disabled for short reads
 	seqFileName = sequence.blast1Path if forceFile != 'true'
-	pieces = [(memInGigs/10), ncpu].max
-	pieceSize = `wc -l "#{seqFileName}`.chomp.to_i / pieces
+	pieces = ([(memInGigs/30), ncpu].min)
+	pieceSize = `wc -l "#{seqFileName}"`.chomp.to_i / pieces
 	pieceSize = pieceSize + (pieceSize % 2) # This needs to be changed if paired-end read suppor tis ever implemented
 	`split -l #{pieceSize} "#{seqFileName}" "#{seqFileName}."`
-	fileCount = pieceSize
-	FileList["#{seqFileName}.*"].each { | blastPiece |
-		if fileCount > 0
-			safeExec("blastn -db \"#{progSettings.ntDatabase}\" -soft_masking true #{dust} -num_threads #{ncpu} -evalue #{sequence.eValue1} -outfmt #{sequence.blastOutputFormat} -query \"#{blastPiece}\" -out \"#{blastPiece}.blast\" &", log, sequence,
+	fileCount = pieces
+	@blastCommands = []
+	FileList["#{seqFileName}.[a-z][a-z]"].each { | blastPiece |
+		@blastCommands << "blastn -db \'#{progSettings.ntDatabase}\' -soft_masking true #{dust} -num_threads #{ncpu} -evalue #{sequence.eValue1} -outfmt #{sequence.blastOutputFormat} -query \'#{blastPiece}\' -out \'#{blastPiece}.blast\' &"
+		fileCount = fileCount - 1
+		if fileCount == 0
+			safeExec("\"#{PROG_DIR}/parallelBlast.sh\" #{@blastCommands.join(' ')}", log, sequence, #This is not a space in the join, rather looks like a space. It is used by the BASH script as a delimiter.
 					'BLAST of reads not performed')
-			fileCount = fileCount - 1
-		else
-			fileCount = pieceSize
-			`wait`
+			@blastCommands = []
+			fileCount = pieces
 		end
 	}
 	`cat "#{seqFileName}.*.blast" > "#{seqFileName}.mergedBlast"`
-	safeExec("\"#{PROG_DIR}/addTaxon.pl\" \"#{progSettings.giTaxIdNuclDatabase}\" \"#{seqFileName}.mergedBlast\" \"#{seqFileName}\"")
+	safeExec("\"#{PROG_DIR}/addTaxon.pl\" \"#{progSettings.giTaxIdNuclDatabase.to_s}\" \"#{seqFileName}.mergedBlast\" \"#{seqFileName}\";", log, sequence,
+			'Adding taxon to end of file not performed')
 end
 
 desc 'MEGAN - Separate reads into taxonomies.'
@@ -387,7 +389,7 @@ end
 
 desc 'ABySS - Assemble reads associated with clusters of taxonomies.'
 task :denovoAssembleCluster => [:abyssInstall, :parallelIteratorInstall, :metaGenomeAnalyzeReads]
-file sequence.blast2Path => sequence.abyssPathGlob do
+file sequence.blast2Path => FileList["#{sequence.abyssPathGlob}"] do
 	puts 'denovoAssemblyCluster'
 	seqFileName = sequence.abyssPathGlob if forceFile != 'true'
 	FileList["#{seqFileName}"].each { | abyssFiles |
@@ -656,7 +658,6 @@ end
 
 desc 'Install latest version of BLAST+.'
 task :blastInstall do
-	puts 'BLASTED'
 	blast = ''
 	if !command? 'blastn'
 		ftp = Net::FTP::new('ftp.ncbi.nlm.nih.gov')
