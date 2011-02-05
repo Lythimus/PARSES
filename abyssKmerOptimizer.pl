@@ -19,13 +19,12 @@ use File::Basename;
 # ARGV3 = Data Type parameter. Either --illumina-quality or --standard-quality
 #
 ###
-
 my @reads = glob $ARGV[0];
 my $sequence;
 foreach my $seq (@reads){ # perform on each input file
 	$sequence = $seq;
 	# execute ABYSS with all kmer in parallel
-	iterate_as_array( \&abyss, [$ARGV[1]..$ARGV[2]]);
+	iterate_as_array( \&abyss, [$ARGV[1]..$ARGV[2]] );
 #	foreach my $kmer ($ARGV[1]..$ARGV[2]){
 #		print $kmer;
 #	}
@@ -40,5 +39,6 @@ foreach my $seq (@reads){ # perform on each input file
 
 sub abyss{
 	my $kmer = shift;
+	$kmer = $kmer+7;
 	`ABYSS -k $kmer $ARGV[3] --out=$sequence.$kmer.kmer.contigs.fa $sequence --coverage-hist=$sequence.$kmer.kmer.contigs.coverage`;
 }

@@ -10,7 +10,7 @@ require 'csv'
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = 'PARSES'
-VER = '0.39'
+VER = '0.40'
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
@@ -21,7 +21,7 @@ end
 # Determine if installing an application
 installMode = false
 for arg in ARGV do
-	if arg =~ /install|index|-T/i
+	if arg =~ /install|index|-T|clobber|clean/i
 		installMode = true
 		break
 	end
@@ -198,9 +198,17 @@ else
 	sequence = Sequence.new('~', 'solexa')
 end
 # Clean and clobber are not functioning at the moment
-#CLEAN.include(sequence.filePath + '\S*')
-#CLOBBER.include(sequence.filePath + '\S*')
-
+seqNameEmpty = seqName.empty?
+seqName = FileList[".[a-zA-Z0-9]*"] if seqNameEmpty #CLEAN or CLOBBER all files if no sequence is specified
+seqName.each{ | sn |
+	seqFileName = YAML.load(File.open(sn)).filePath if seqNameEmpty
+	CLEAN.include("#{sn}_tophat_out")
+	CLEAN.include("reads-*.fasta.*.kmer.contigs.fa")
+	CLOBBER.include("#{seqFileName}*")
+	CLOBBER.exclude("#{seqFileName}.novo.NM.fasta.nospans.blast.megan.rma.kmerOptimized.fa.blast.megan.rma")
+	CLOBBER.include(".#{sn}")
+	CLOBBER.include("#{sn}.log")
+}
 ### GATHER SYSTEM INFORMATION
 
 locate = (command? 'locate') && (!ENV['LOCATE_PATH'].to_s.empty? or File.exists? '/var/lib/mlocate/mlocate.db')
@@ -333,7 +341,7 @@ file sequence.megan1Path => sequence.blast1Path do
 	`split -l #{pieceSize} "#{seqFileName}" "#{seqFileName}."`
 	fileCount = pieces
 	@blastCommands = []
-	FileList["#{seqFileName}.[a-z][a-z]"].each { | blastPiece |
+	FileList["#{seqFileName}.[a-zA-Z0-9][a-zA-Z0-9]"].each { | blastPiece |
 		@blastCommands << "blastn -db \'#{progSettings.ntDatabase}\' -soft_masking true #{dust} -num_threads #{ncpu} -evalue #{sequence.eValue1} -outfmt #{sequence.blastOutputFormat} -query \'#{blastPiece}\' -out \'#{blastPiece}.blast\' &"
 		fileCount = fileCount - 1
 		if fileCount == 0
@@ -343,7 +351,7 @@ file sequence.megan1Path => sequence.blast1Path do
 			fileCount = pieces
 		end
 	}
-	`cat "#{seqFileName}.*.blast" > "#{seqFileName}.mergedBlast"`
+	`cat #{seqFileName}.[a-z][a-z].blast > #{seqFileName}.mergedBlast`
 	safeExec("\"#{PROG_DIR}/addTaxon.pl\" \"#{progSettings.giTaxIdNuclDatabase.to_s}\" \"#{seqFileName}.mergedBlast\" \"#{seqFileName}\";", log, sequence,
 			'Adding taxon to end of file not performed')
 end
@@ -360,7 +368,7 @@ file sequence.abyssPath => sequence.megan1Path do
 		exitStatus, results = safeExec("MEGAN -f \"#{sequence.abyssPath}\" -x \"#{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;\";", log, sequence,
 			'Opening MEGAN file not performed')
 	else
-		safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
+		safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} select nodes=all; uncollapse subtrees; update; exportimage format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
 			'MEGAN processing of BLASTed reads not performed')
 		exitStatus, results = safeExec("MEGAN -f \"#{sequence.abyssPath}\" -x \"set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;\";", log, sequence,
 			'Opening MEGAN file not performed')
@@ -383,7 +391,7 @@ file sequence.blast2Path => FileList["#{sequence.abyssPathGlob}"] do
 		exitStatus = safeExec("\"#{PROG_DIR}/abyssKmerOptimizer.pl\" \"#{abyssFiles}\" #{sequence.minKmerLength} #{sequence.maxKmerLength} #{setDataTypes.abyss};", log, sequence,
 			'ABySS not performed')
 	}
-	`cat "#{sequence.blastPathGlob}" > "#{sequence.blast2Path}"` if forceFile != 'true'
+	`cat #{sequence.blastPathGlob} > #{sequence.blast2Path}` if forceFile != 'true'
 	if exitStatus == 0
 		coverageThreshold = $_ if (results =~ /(Using a coverage threshold of \d+)/)
 		medianKmerCoverage = $_ if (results =~ /(The median k-mer coverage is \d+)/)
