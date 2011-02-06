@@ -1,4 +1,4 @@
-#PARSES V0.40
+#PARSES V0.41
 For more information see [wiki](https://github.com/Lythimus/PARSES/wiki)
 
 #Requirements

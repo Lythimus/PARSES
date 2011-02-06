@@ -10,7 +10,7 @@ require 'csv'
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = 'PARSES'
-VER = '0.40'
+VER = '0.41'
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
@@ -103,7 +103,7 @@ class Sequence
 			line = f.gets while line[0] =~ /\W/
 			@readLength=line.length
 			f.close
-			@numOfReads=`egrep -c '^[ACTGN]' "#{filePath}"`
+			@numOfReads="#{`egrep -c '^[ACTGN]' "#{filePath}"`}".chomp.to_i
 		else
 			filePath=''
 		end
@@ -374,10 +374,10 @@ file sequence.abyssPath => sequence.megan1Path do
 			'Opening MEGAN file not performed')
 	end
 	if exitStatus == 0
-		totalReads = $_ if (results =~ /Total reads:\s*(\d+)/).chomp.to_i
-		assignedReads = $_ if (results =~ /Assigned reads:\s*(\d+)/).chomp.to_i
-		unassignedReads = $_ if (results =~ /Unassigned reads:\s*(\d+)/).chomp.to_i
-		noHits = $_ if (results =~ /Reads with no hits:\s*(\d+)/).chomp.to_i
+		totalReads = $_.chomp.to_i if (results =~ /Total reads:\s*(\d+)/)
+		assignedReads = $_.chomp.to_i if (results =~ /Assigned reads:\s*(\d+)/)
+		unassignedReads = $_.chomp.to_i if (results =~ /Unassigned reads:\s*(\d+)/)
+		noHits = $_.chomp.to_i if (results =~ /Reads with no hits:\s*(\d+)/)
 		log.info("Potential Exogenous Reads: #{totalReads}. Assigned Reads: #{assignedReads} which is #{assignedReads/sequence.numOfReads}% of entire data set. Unassigned Reads: #{unassignedReads} which means LCA hides #{unassignedReads/totalReads}% of the data. No hits: #{noHits} which is #{noHits/sequence.numOfReads} of the entire data set.")
 	end
 end
@@ -387,8 +387,9 @@ task :denovoAssembleCluster => [:abyssInstall, :parallelIteratorInstall, :metaGe
 file sequence.blast2Path => FileList["#{sequence.abyssPathGlob}"] do
 	puts 'denovoAssemblyCluster'
 	seqFileName = sequence.abyssPathGlob if forceFile != 'true'
+	exitStatus=-1
 	FileList["#{seqFileName}"].each { | abyssFiles |
-		exitStatus = safeExec("\"#{PROG_DIR}/abyssKmerOptimizer.pl\" \"#{abyssFiles}\" #{sequence.minKmerLength} #{sequence.maxKmerLength} #{setDataTypes.abyss};", log, sequence,
+		exitStatus = safeExec("\"#{PROG_DIR}/abyssKmerOptimizer.pl\" #{abyssFiles} #{sequence.minKmerLength} #{sequence.maxKmerLength} #{setDataTypes.abyss};", log, sequence,
 			'ABySS not performed')
 	}
 	`cat #{sequence.blastPathGlob} > #{sequence.blast2Path}` if forceFile != 'true'
@@ -409,6 +410,8 @@ file sequence.megan2Path => sequence.blast2Path do
 	seqFileName = sequence.blast2Path if forceFile != 'true'
 	safeExec("blastn -db \"#{progSettings.ntDatabase}\" -soft_masking true -num_threads #{ncpu} -evalue #{sequence.eValue2} -outfmt #{sequence.blastOutputFormat} -query \"#{seqFileName}\" -out \"#{sequence.megan2Path}\";", log, sequence,
 			'BLAST of contigs not performed')
+	safeExec("\"#{PROG_DIR}/addTaxon.pl\" \"#{progSettings.giTaxIdNuclDatabase.to_s}\" \"#{sequence.megan2Path}\" \"#{seqFileName}\";", log, sequence,
+			'Adding taxon to end of BLAST contigs file not performed')
 end
 
 desc 'MEGAN - Separate contigs into taxonomies.'
@@ -416,16 +419,15 @@ task :metaGenomeAnalyzeContigs => [ :meganInstall, :localAlignContigs]
 file sequence.pipeEndPath => sequence.megan2Path do
 	## DIDN'T IMPLEMENT forceFile BECAUSE TOO COMPLICATED
 	puts 'metaGenomeAnalyzeContigs'
-	`MEGAN -f "#{sequence.pipeEndPath}.rma"`
 	safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan2Path}' readfile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan2Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
 			'MEGAN processing of BLASTed contigs not performed')
 	exitStatus, results = safeExec("MEGAN -f \"#{sequence.pipeEndPath}.rma\";", log, sequence,
 			'Opening MEGAN file not performed')
 	if exitStatus == 0
-		totalReads = $_ if (results =~ /Total reads:\s*(\d+)/).chomp.to_i
-		assignedReads = $_ if (results =~ /Assigned reads:\s*(\d+)/).chomp.to_i
-		unassignedReads = $_ if (results =~ /Unassigned reads:\s*(\d+)/).chomp.to_i
-		noHits = $_ if (results =~ /Reads with no hits:\s*(\d+)/).chomp.to_i
+		totalReads = $_.chomp.to_i if (results =~ /Total reads:\s*(\d+)/)
+		assignedReads = $_.chomp.to_i if (results =~ /Assigned reads:\s*(\d+)/)
+		unassignedReads = $_.chomp.to_i if (results =~ /Unassigned reads:\s*(\d+)/)
+		noHits = $_.chomp.to_i if (results =~ /Reads with no hits:\s*(\d+)/)
 		log.info("Potential Exogenous Reads: #{totalReads}. Assigned Reads: #{assignedReads}. Unassigned Reads: #{unassignedReads}. No hits: #{noHits}.")
 	end
 end

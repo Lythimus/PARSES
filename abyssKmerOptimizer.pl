@@ -29,8 +29,8 @@ foreach my $seq (@reads){ # perform on each input file
 #		print $kmer;
 #	}
 	# pull out best N50 score and make a copy of the file with best score
-	my ($file, $dir) = fileparse($0);
-	my @facBestResult = sort qx{ ${dir}fac.pl $sequence.*.contigs.fa };
+	my $dir = dirname($0);
+	my @facBestResult = sort qx{ "$dir/fac.pl" $sequence.*.contigs.fa };
 	$_ = $facBestResult[-1];
 	split ('\t');
 	chomp $_[1];
