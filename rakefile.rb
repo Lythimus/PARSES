@@ -10,7 +10,7 @@ require 'csv'
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = 'PARSES'
-VER = '0.41'
+VER = '0.42'
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
@@ -131,7 +131,7 @@ class Sequence
 #MEGAN
 		@expansionNumber=10
 		@maxMatches=0
-		@minScoreByLength=0
+		@minScoreByLength=25
 		@topPercent=10.0
 		@winScore=0.0
 		@minSupport=5
@@ -268,16 +268,20 @@ when OS::OSX
 	ncpu = `sysctl -n hw.ncpu`.chomp.to_i
 	"#{`/usr/sbin/system_profiler SPHardwareDataType | grep Memory`}" =~ /Memory:\s+(\d+)\s*GB/;
 	memInGigs = $1.chomp.to_i
-	Net::HTTP.start('cloud.github.com', 80) { |http|
-		progRepo = YAML.load(http.get('/downloads/Lythimus/PARSES/.programRepositoryMac.txt').body)
-	}
+	if useRepo
+		Net::HTTP.start('cloud.github.com', 80) { |http|
+			progRepo = YAML.load(http.get('/downloads/Lythimus/PARSES/.programRepositoryMac.txt').body)
+		}
+	end
 when OS::LINUX
 	`cat /proc/cpuinfo | grep -G processor.*:.* | tail -n 1` =~ /processor.*:.*(\d+)/
 	ncpu = $1.chomp.to_i + 1
 	memInGigs = %x[echo `cat /proc/meminfo | grep MemTotal` | sed  "s/[^0-9]//g"].to_i/2**20
-	Net::HTTP.start('cloud.github.com', 80) { |http|
-		progRepo = YAML.load(http.get('/downloads/Lythimus/PARSES/.programRepositoryLinux.txt').body)
-	}
+	if useRepo
+		Net::HTTP.start('cloud.github.com', 80) { |http|
+			progRepo = YAML.load(http.get('/downloads/Lythimus/PARSES/.programRepositoryLinux.txt').body)
+		}
+	end
 end
 
 ## consider adding time of processing to all logs
@@ -361,14 +365,14 @@ task :metaGenomeAnalyzeReads => [ :meganInstall, :localAlignReads]
 file sequence.abyssPath => sequence.megan1Path do
 	puts 'metaGenomeAnalyzeReads'
 	## DIDN'T IMPLEMENT forceFile BECAUSE TOO COMPLICATED
-	`MEGAN -V` =~ /(4.0)/
-	if ($_.to_i < 4.0)
-		safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
+	`MEGAN +g -V -E -x 'CRASHPROGRAMPLS'` =~ /MEGAN.*version\s*(\d+\.?\d*)/
+	if ($1.to_f < 4.0)
+		safeExec("MEGAN +g -E -x \"import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
 			'MEGAN processing of BLASTed reads not performed')
 		exitStatus, results = safeExec("MEGAN -f \"#{sequence.abyssPath}\" -x \"#{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;\";", log, sequence,
 			'Opening MEGAN file not performed')
 	else
-		safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} select nodes=all; uncollapse subtrees; update; exportimage format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
+		safeExec("MEGAN +g -E -x \"import blastfile='#{sequence.megan1Path}' readfile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} select nodes=all; uncollapse subtrees; update; exportimage format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
 			'MEGAN processing of BLASTed reads not performed')
 		exitStatus, results = safeExec("MEGAN -f \"#{sequence.abyssPath}\" -x \"set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;\";", log, sequence,
 			'Opening MEGAN file not performed')
@@ -408,9 +412,9 @@ task :localAlignContigs => [:blastInstall, :ntInstall, :denovoAssembleCluster]
 file sequence.megan2Path => sequence.blast2Path do
 	puts 'localAlignContigs'
 	seqFileName = sequence.blast2Path if forceFile != 'true'
-	safeExec("blastn -db \"#{progSettings.ntDatabase}\" -soft_masking true -num_threads #{ncpu} -evalue #{sequence.eValue2} -outfmt #{sequence.blastOutputFormat} -query \"#{seqFileName}\" -out \"#{sequence.megan2Path}\";", log, sequence,
+	safeExec("blastn -db \"#{progSettings.ntDatabase}\" -soft_masking true -num_threads #{ncpu} -evalue #{sequence.eValue2} -outfmt #{sequence.blastOutputFormat} -query \"#{seqFileName}\" -out \"#{sequence.megan2Path}.noTax\";", log, sequence,
 			'BLAST of contigs not performed')
-	safeExec("\"#{PROG_DIR}/addTaxon.pl\" \"#{progSettings.giTaxIdNuclDatabase.to_s}\" \"#{sequence.megan2Path}\" \"#{seqFileName}\";", log, sequence,
+	safeExec("\"#{PROG_DIR}/addTaxon.pl\" \"#{progSettings.giTaxIdNuclDatabase.to_s}\" \"#{sequence.megan2Path}.noTax\" \"#{seqFileName}\";", log, sequence,
 			'Adding taxon to end of BLAST contigs file not performed')
 end
 
@@ -419,10 +423,18 @@ task :metaGenomeAnalyzeContigs => [ :meganInstall, :localAlignContigs]
 file sequence.pipeEndPath => sequence.megan2Path do
 	## DIDN'T IMPLEMENT forceFile BECAUSE TOO COMPLICATED
 	puts 'metaGenomeAnalyzeContigs'
-	safeExec("MEGAN +g -x \"import blastfile='#{sequence.megan2Path}' readfile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' maxmatches=#{sequence.maxMatches} minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan2Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
-			'MEGAN processing of BLASTed contigs not performed')
-	exitStatus, results = safeExec("MEGAN -f \"#{sequence.pipeEndPath}.rma\";", log, sequence,
-			'Opening MEGAN file not performed')
+	`MEGAN +g -V -E -x 'CRASHPROGRAMPLS'` =~ /MEGAN.*version\s*(\d+\.?\d*)/
+	if ($1.to_f < 4.0)
+		safeExec("MEGAN +g -E -x \"import blastfile='#{sequence.megan2Path}' readfile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan2Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
+				'MEGAN processing of BLASTed contigs not performed')
+		exitStatus, results = safeExec("MEGAN -f \"#{sequence.pipeEndPath}.rma\";", log, sequence,
+				'Opening MEGAN file not performed')
+	else
+		safeExec("MEGAN +g -E -x \"import blastfile='#{sequence.megan2Path}' readfile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{sequence.minSupport} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; update; set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} select nodes=all; uncollapse subtrees; update; exportimage format='#{sequence.imageFileType}' file='#{sequence.megan2Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
+				'MEGAN processing of BLASTed contigs not performed')
+		exitStatus, results = safeExec("MEGAN -f \"#{sequence.pipeEndPath}.rma\";", log, sequence,
+				'Opening MEGAN file not performed')
+	end
 	if exitStatus == 0
 		totalReads = $_.chomp.to_i if (results =~ /Total reads:\s*(\d+)/)
 		assignedReads = $_.chomp.to_i if (results =~ /Assigned reads:\s*(\d+)/)

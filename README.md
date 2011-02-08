@@ -1,4 +1,4 @@
-#PARSES V0.41
+#PARSES V0.42
 For more information see [wiki](https://github.com/Lythimus/PARSES/wiki)
 
 #Requirements
@@ -152,6 +152,10 @@ The primary method for viewing results involves perusing the RMA file produced b
 Your results will resemble the following:
 
 <img src="http://dl.dropbox.com/u/8709992/minscore55minsupport30.jpg" width="900">
+
+For a detailed example of what results changing LCA parameters will have click the image below (or [here for a PDF version](https://github.com/downloads/Lythimus/PARSES/MEGAN%20LCA%20Parameters%20Example.pdf)).
+
+[<img src="https://github.com/downloads/Lythimus/PARSES/MEGAN%20LCA%20Parameters%20Examples.png" width="600">](http://prezi.com/rxuwymk1artv/megan-lca-parameters-example/)
 
 ##Report
 Reporting is currently stored in logs.
