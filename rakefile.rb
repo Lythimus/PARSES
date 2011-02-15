@@ -10,14 +10,32 @@ require 'csv'
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = 'PARSES'
-VER = '0.42'
+VER = '0.43'
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
-def command?(name)
-  `which #{name}`
-  $?.success?
+# Execute a bash command, time it, and log it.
+def safeExec(command, log, sequence, errorMessage)
+	results=`{ /usr/bin/time #{command} } 2> .time`
+	if $?.exitstatus != 0
+		puts "#{errorMessage} (status = #{$?.exitstatus})"
+		log.info("#{errorMessage} (status = #{$?.exitstatus})")
+	else
+		timeFile = File.open(".time")
+		File.open(".time").first =~ /(\d+).\d+ real/
+		timeFile.close
+		sequence.executionTime = sequence.executionTime + $1.to_i
+		log.info("#{command} execution time: #{Time.at($1.to_i).gmtime.strftime('%R:%S')}")
+	end
+	return $?.exitstatus, results
 end
+
+# Determine if software is installed
+def command?(name)
+	`which #{name}`
+	$?.success?
+end
+
 # Determine if installing an application
 installMode = false
 for arg in ARGV do
@@ -27,6 +45,7 @@ for arg in ARGV do
 	end
 end
 
+# Columnar representation of a Novoalign file
 class NOVOFILE
 	READ_HEADER=0
 	READ_TYPE=1
@@ -46,6 +65,7 @@ class NOVOFILE
 	HUMAN_TAXONOMY_NUMBER=9606
 end
 
+# Links to each program which may be used should the tool not be automatically downloaded properly
 class ProgramRepository
 	attr_accessor :megan, :tophat, :abyss, :novoalign, :blast, :bowtie, :samtools, :hg
 end
@@ -71,12 +91,16 @@ def fetch(uri_str, limit = 10)
 	end
 end
 
+# Program settings such as paths to various databases and indices
 class Settings
 	attr_accessor :humanGenomeDatabase, :ntDatabase, :giTaxIdNuclDatabase, :bowtieIndex, :novoIndex
 end
 
+# Load program configuration file
 if File::exists?(File.expand_path("~/.#{PROG_NAME}")) #Program has been executed before
-	progSettings = YAML.load(File.open(File.expand_path("~/.#{PROG_NAME}")))
+	progSettingsFile = File.open(File.expand_path("~/.#{PROG_NAME}"))
+	progSettings = YAML.load(progSettingsFile)
+	progSettingsFile.close
 else
 	progSettings = Settings.new
 end
@@ -93,7 +117,10 @@ dataType = "#{ENV['type']}".chomp
 useRepo = "#{ENV['repo']}".chomp
 truncate = "#{ENV['truncate']}".chomp
 forceFile = "#{ENV['forcefile']}".chomp
+indexName = "#{ENV['indexName']}".chomp
+indexGlob = "#{ENV['indexGlob']}".chomp
 
+# Specify properties about this individual data set/run
 class Sequence
 	attr_accessor :readLength, :dataType, :executionTime, :filePath, :numOfReads, :novoalignPath, :removeNonMappedPath, :blast1Path, :megan1Path, :abyssPath, :abyssPathGlob, :minKmerLength, :maxKmerLength, :blastPathGlob, :blast2Path, :eValue1, :eValue2, :blastOutputFormat, :megan2Path, :expansionNumber, :maxMatches, :minScoreByLength, :topPercent, :winScore, :minSupport, :useCogs, :useGos, :imageFileType, :pipeEndPath
 	def initialize(filePath, dataType)
@@ -130,7 +157,6 @@ class Sequence
 		@blastOutputFormat=6
 #MEGAN
 		@expansionNumber=10
-		@maxMatches=0
 		@minScoreByLength=25
 		@topPercent=10.0
 		@winScore=0.0
@@ -143,6 +169,7 @@ end
 
 # Novoalign supports PRB, PRBnSEQ, QSEQ Illumina from Bustard, ABI Solid color space FASTA, ABI Solid color space with qual file, and color space FASTQ.
 # Tophat supports colorspace FASTA and space-delimited interger files
+# Data types supported
 class DataType
 	attr_accessor :novoalign, :tophat, :abyss
 	def initialize(dataType)
@@ -170,9 +197,11 @@ class DataType
 		end
 	end
 end
+# Load information concerning this data set/run
 if (!installMode)
 	if File::exists?(".#{seqName}") #Sequence has been run before
-		sequence = YAML.load(File.open(".#{seqName}"))
+		seqFile = File.open(".#{seqName}")
+		sequence = YAML.load(sequenceSettingsFile)
 		#Was a new file or file type entered from commandline?
 		if seqFileName.empty?
 			seqFileName = sequence.filePath
@@ -187,30 +216,49 @@ if (!installMode)
 	elsif seqFileName.empty? or dataType.empty? #Sequence has not been run and a file or data type is not specified
 		abort "Must specify a file of data to analyze for the first execution of the process as well as it's data type via the file= and type= options" if !installMode
 	else #Sequence has not been run, but file and file type are specified
-		seqFile = File.open(".#{seqName}", 'a')
+		seqFile = File.open(".#{seqName}")
 		sequence = Sequence.new(seqFileName, dataType)
 	end
+	seqFile.close
 	setDataTypes = DataType.new(sequence.dataType)
 
 	log = Logger.new("#{seqName}.log")
 	log.info("Begin run for seq=#{seqName} file=#{seqFileName} type=#{dataType} task=#{ARGV[-1]}")
 else
-	sequence = Sequence.new('~', 'solexa')
+	sequence = Sequence.new('~', 'solexa') #garbage data just to get things installed
 end
-# Clean and clobber are not functioning at the moment
-seqNameEmpty = seqName.empty?
-seqName = FileList[".[a-zA-Z0-9]*"] if seqNameEmpty #CLEAN or CLOBBER all files if no sequence is specified
-seqName.each{ | sn |
-	seqFileName = YAML.load(File.open(sn)).filePath if seqNameEmpty
-	CLEAN.include("#{sn}_tophat_out")
-	CLEAN.include("reads-*.fasta.*.kmer.contigs.fa")
-	CLOBBER.include("#{seqFileName}*")
-	CLOBBER.exclude("#{seqFileName}.novo.NM.fasta.nospans.blast.megan.rma.kmerOptimized.fa.blast.megan.rma")
-	CLOBBER.include(".#{sn}")
-	CLOBBER.include("#{sn}.log")
-}
+
+# Clean and clobber
+if installMode
+	seqNameEmpty = seqName.empty?
+	seqName = FileList[".[a-zA-Z0-9]*"] if seqNameEmpty #CLEAN or CLOBBER all files if no sequence is specified
+	seqName.each{ | sn |
+		seqFile = File.open(".#{sn}")
+		seqFileName = YAML.load(seqFile).filePath
+		seqFileName = YAML.load(seqFile).filePath if seqNameEmpty and 
+		seqFile.close
+		CLEAN.include("#{sn}_tophat_out")
+		CLEAN.include("#{seqFileName}.novo.counts")
+		CLEAN.include("#{seqFileName}.novo.NM.fasta.nospans.details")
+		CLEAN.include("#{seqFileName}.novo.NM.fasta.nospans.mergedBlast")
+		CLEAN.include("#{seqFileName}.novo.NM.fasta.nospans.[a-z][a-z]")
+		CLEAN.include("#{seqFileName}.novo.NM.fasta.nospans.[a-z][a-z].blast")
+		CLEAN.include("reads-*.fasta.*.kmer.contigs.fa")
+		CLEAN.include("reads-*.fasta.*.kmer.contigs.coverage")
+		CLEAN.include(".time")
+		CLOBBER.include("#{seqFileName}.*")
+		CLOBBER.include("reads-*")
+		CLOBBER.exclude("#{seqFileName}.novo.NM.fasta.nospans.blast.megan.rma.kmerOptimized.fa.blast.megan.rma")
+		CLOBBER.exclude("#{seqFileName}.novo.NM.fasta.nospans.blast.megan.rma.kmerOptimized.fa.blast.pdf")
+		CLOBBER.include(".#{sn}")
+		CLOBBER.include("#{sn}.log")
+	}
+end
+
+
 ### GATHER SYSTEM INFORMATION
 
+# Determine which program to use to find files and find the first hit
 locate = (command? 'locate') && (!ENV['LOCATE_PATH'].to_s.empty? or File.exists? '/var/lib/mlocate/mlocate.db')
 def findFile(filename, locate)
 	path = ''
@@ -219,22 +267,39 @@ def findFile(filename, locate)
 	return path.to_s
 end
 
-def safeExec(command, log, sequence, errorMessage)
-	results=`{ /usr/bin/time #{command} } 2> .time`
-	if $?.exitstatus != 0
-		puts "#{errorMessage} (status = #{$?.exitstatus})"
-		log.info("#{errorMessage} (status = #{$?.exitstatus})")
-	else
-		File.open(".time").first =~ /(\d+).\d+ real/
-		sequence.executionTime = sequence.executionTime + $1.to_i
-		log.info("#{command} execution time: #{Time.at($1.to_i).gmtime.strftime('%R:%S')}")
+# Find a novo index of the specificied criteria, make one if not found
+def buildNovoIndex(name, pathGlob)
+	novoIndex=findFile("#{name}*.ndx", locate)
+	if novoIndex.to_s.empty?
+		novoIndex="#{File.dirname(pathGlob)}/#{name}.ndx"
+		`novoindex "#{novoIndex}" "#{pathGlob}"`
 	end
-	return $?.exitstatus, results
+	return novoIndex.to_s.chomp
+end
+
+# Find a bowtie index of the specificied criteria, make one if not found
+def buildBowtieIndex(name, pathGlob)
+	bowtieIndex=findFile("#{name}*.ebwt", locate)
+	bowtieIndex= $1 if bowtieIndex =~ /(.*#{name}.*)\.\d+\.ebwt/i
+	resourceFiles=''
+	if bowtieIndex.to_s.empty?
+		bowtieIndex="#{File.dirname(pathGlob)}/#{name}"
+		FileList[pathGlob].each do |filename|
+			resourceFiles << filename + ','
+		end
+		resourceFiles.chomp!(',')
+		sh %{
+			cd "#{File.dirname(pathGlob)}";
+			bowtie-build "#{resourceFiles}" "#{name}";
+		}
+	end
+	return bowtieIndex.to_s.chomp
 end
 
 # shell=`ps -p $$ | tail -1 | awk '{print $NF}'` #supposedly more accurate method to return shell, but is returning sh instead of bash
 shell = File.basename(ENV['SHELL']).chomp
 
+# Represents operating system of current environment
 class OS
 	OSX=0
 	LINUX=1
@@ -243,6 +308,7 @@ class OS
 	WINDOWS=4
 end
 
+# Determine OS
 osName = `uname -s`.chomp!
 case osName
 when 'Darwin'
@@ -257,7 +323,7 @@ when /CYGWIN/
 	os = OS::WINDOWS
 end
 
-arch = `uname -m` =~ /64/ ? 64 : 32
+arch = `uname -m` =~ /64/ ? 64 : 32 #Determine architecture
 ncpu = -1
 memInGigs = -1
 progRepo = ProgramRepository.new
@@ -265,20 +331,20 @@ progRepo = ProgramRepository.new
 #Download program links repositories
 case os
 when OS::OSX
-	ncpu = `sysctl -n hw.ncpu`.chomp.to_i
-	"#{`/usr/sbin/system_profiler SPHardwareDataType | grep Memory`}" =~ /Memory:\s+(\d+)\s*GB/;
+	ncpu = `sysctl -n hw.ncpu`.chomp.to_i # determine number of cpus for MacOS
+	"#{`/usr/sbin/system_profiler SPHardwareDataType | grep Memory`}" =~ /Memory:\s+(\d+)\s*GB/; # determine amount of memory in MacOS
 	memInGigs = $1.chomp.to_i
 	if useRepo
-		Net::HTTP.start('cloud.github.com', 80) { |http|
+		Net::HTTP.start('cloud.github.com', 80) { |http| # download repository for MacOS
 			progRepo = YAML.load(http.get('/downloads/Lythimus/PARSES/.programRepositoryMac.txt').body)
 		}
 	end
 when OS::LINUX
 	`cat /proc/cpuinfo | grep -G processor.*:.* | tail -n 1` =~ /processor.*:.*(\d+)/
-	ncpu = $1.chomp.to_i + 1
-	memInGigs = %x[echo `cat /proc/meminfo | grep MemTotal` | sed  "s/[^0-9]//g"].to_i/2**20
+	ncpu = $1.chomp.to_i + 1 # determine number of cpus for Linux
+	memInGigs = %x[echo `cat /proc/meminfo | grep MemTotal` | sed  "s/[^0-9]//g"].to_i/2**20 # determine amount of memory in Linux
 	if useRepo
-		Net::HTTP.start('cloud.github.com', 80) { |http|
+		Net::HTTP.start('cloud.github.com', 80) { |http| # download repository for Linux
 			progRepo = YAML.load(http.get('/downloads/Lythimus/PARSES/.programRepositoryLinux.txt').body)
 		}
 	end
@@ -292,8 +358,13 @@ desc 'Novoalign - Align reads in to base genome'
 task :alignSequence => [:novoalignInstall, :hgInstall, :novoIndex]
 file sequence.novoalignPath => sequence.filePath do
 	puts 'Sequence Alignment'
+	if indexName.empty? or indexGlob.empty?
+		novoIndex = progSettings.novoIndex
+	else
+		novoIndex = buildNovoIndex(indexName, indexGlob)
+	end
 	seqFileName = sequence.filePath if forceFile != 'true'
-	exitStatus = safeExec("novoalign -d \"#{progSettings.novoIndex}\" #{setDataTypes.novoalign} -f \"#{seqFileName}\" > \"#{sequence.novoalignPath}\";", log, sequence,
+	exitStatus = safeExec("novoalign -d \"#{novoIndex}\" #{setDataTypes.novoalign} -f \"#{seqFileName}\" > \"#{sequence.novoalignPath}\";", log, sequence,
 			'Novoalign sequence alignment not performed')
 	if exitStatus == 0
 		readsLeft=`egrep -c '@' "#{sequence.novoalignPath}"`
@@ -319,7 +390,12 @@ task :removeSpans => [:bowtieIndex, :tophatInstall, :removeHuman]
 file sequence.blast1Path => sequence.removeNonMappedPath do
 	puts 'RemoveSpans'
 	## DIDN'T IMPLEMENT forceFile BECAUSE TOO COMPLICATED
-	safeExec("tophat -p #{ncpu} #{setDataTypes.tophat} --output-dir \"#{ENV['seq']}_tophat_out\" \"#{progSettings.bowtieIndex}\" \"#{sequence.filePath}\";", log, sequence,
+	if indexName.empty? or indexGlob.empty?
+		bowtieIndex = progSettings.bowtieIndex
+	else
+		bowtieIndex = buildBowtieIndex(indexName, indexGlob)
+	end
+	safeExec("tophat -p #{ncpu} #{setDataTypes.tophat} --output-dir \"#{ENV['seq']}_tophat_out\" \"#{bowtieIndex}\" \"#{sequence.filePath}\";", log, sequence,
 			'TopHat sequence alignment not performed')
 	safeExec("samtools view -h -o \"#{ENV['seq']}_tophat_out/accepted_hits.sam\" \"#{ENV['seq']}_tophat_out/accepted_hits.bam\";", log, sequence,
 			'Samtools conversion not performed')
@@ -340,6 +416,7 @@ file sequence.megan1Path => sequence.blast1Path do
 	dust = "-dust no" if sequence.readLength < 50 # Dust filtering should be disabled for short reads
 	seqFileName = sequence.blast1Path if forceFile != 'true'
 	pieces = ([(memInGigs/30), ncpu].min)
+	pieces = 1 if pieces == 0
 	pieceSize = `wc -l "#{seqFileName}"`.chomp.to_i / pieces
 	pieceSize = pieceSize + (pieceSize % 2) # This needs to be changed if paired-end read suppor tis ever implemented
 	`split -l #{pieceSize} "#{seqFileName}" "#{seqFileName}."`
@@ -476,32 +553,14 @@ end
 desc 'Create an index for novoalign of the human genome database.'
 task :novoIndex => [:hgInstall, :novoalignInstall] do
 	if progSettings.novoIndex.to_s.empty?
-		progSettings.novoIndex=findFile('*hg*.ndx', locate)
-		if progSettings.novoIndex.to_s.empty?
-			progSettings.novoIndex="#{progSettings.humanGenomeDatabase.to_s}/hgChrAll.ndx"
-			`novoindex "#{progSettings.novoIndex.to_s}" "#{progSettings.humanGenomeDatabase.to_s}/chr[0-9XY].fa" "#{progSettings.humanGenomeDatabase.to_s}/chr[0-9][0-9].fa"`
-		end
+		progSettings.novoIndex=buildNovoIndex('hgChrAll', "#{progSettings.humanGenomeDatabase.to_s}/chr[0-9XY]*.fa")
 	end
 end
 
 desc 'Create an index for bowtie/tophat of the human genome database.'
 task :bowtieIndex => [:hgInstall, :bowtieInstall] do
 	if progSettings.bowtieIndex.to_s.empty?
-		bowtieIndex=findFile("*hg*\.ebwt", locate)
-		progSettings.bowtieIndex= $1 if bowtieIndex =~ /(.*hg.*)\.\d+\.ebwt/i
-		resourceFiles=''
-		if progSettings.bowtieIndex.to_s.empty?
-			progSettings.bowtieIndex=progSettings.humanGenomeDatabase.to_s + '/hgChrAll'
-			FileList[progSettings.humanGenomeDatabase.to_s + '/*.fa'].each do |filename|
-				resourceFiles << $1 + ',' if filename =~ /.*(chr[0-9XY]+.fa)/
-			end
-			resourceFiles.chomp!(',')
-			sh %{
-				cd "#{progSettings.humanGenomeDatabase.to_s}";
-				bowtie-build "#{resourceFiles}" "#{progSettings.bowtieIndex.to_s}";
-				`echo "export BOWTIEINDEX=#{progSettings.bowtieIndex.to_s}" >> ~/.#{shell}rc;`;
-			}
-		end
+		progSettings.bowtieIndex=buildBowtieIndex('hgChrAll', "#{progSettings.humanGenomeDatabase.to_s}/chr[0-9XY]*.fa")
 	end
 end
 
@@ -792,6 +851,16 @@ task :parallelIteratorInstall do
 	end
 end
 
+desc 'Index the genome of a specified organism with Novo and Bowtie.'
+task :otherIndex do
+	puts 'OtherIndex'
+	if !indexName.empty? and !indexGlob.empty?
+		buildNovoIndex(indexName, indexGlob)
+		buildBowtieIndex(indexName, indexGlob)
+	end
+end
+
+
 task :default do
 	Rake::Task[:metaGenomeAnalyzeContigs].invoke
 end
@@ -817,8 +886,12 @@ end
 desc 'Automatically saving any settings changes which may have been made'
 task :reserialize do
 	# Reserialize object in case any changes have been made
-	YAML.dump(sequence, File.open(".#{seqName}", 'w')) if !installMode
-	YAML.dump(progSettings, File.open(File.expand_path("~/.#{PROG_NAME}"), 'w'))
+	seqFile = File.open(".#{seqName}", 'w')
+	progSettingsFile = File.open(File.expand_path("~/.#{PROG_NAME}"), 'w')
+	YAML.dump(sequence, seqFile) if !installMode
+	YAML.dump(progSettings, progSettingsFile)
+	seqFile.close
+	progSettingsFile.close
 end
 
 #Allow for pipeline override, chopping off the front of the pipeline
