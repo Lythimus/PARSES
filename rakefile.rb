@@ -6,11 +6,14 @@ require 'uri'
 require 'rake/clean'
 require 'csv'
 
+# Joseph Coco
+# See README.md for usage.
+
 #### DISCLAIMER
 # This product may not be used for any sort of financial gain. Licenses for both MEGAN and Novoalign are strictly for non-profit research at non-profit institutions and academic usage.
 
 PROG_NAME = 'PARSES'
-VER = '0.44'
+VER = '0.45'
 PROG_DIR = File.dirname(__FILE__)
 MEGAN_EXPANSION = 'expand direction=vertical; update;'
 
@@ -282,6 +285,7 @@ end
 
 # Find a novo index of the specificied criteria, make one if not found
 def buildNovoIndex(name, pathGlob)
+	locate = (command? 'locate') && (!ENV['LOCATE_PATH'].to_s.empty? or File.exists? '/var/lib/mlocate/mlocate.db')
 	novoIndex=findFile("#{name}*.ndx", locate)
 	if novoIndex.to_s.empty?
 		novoIndex="#{File.dirname(pathGlob)}/#{name}.ndx"
@@ -292,6 +296,7 @@ end
 
 # Find a bowtie index of the specificied criteria, make one if not found
 def buildBowtieIndex(name, pathGlob)
+	locate = (command? 'locate') && (!ENV['LOCATE_PATH'].to_s.empty? or File.exists? '/var/lib/mlocate/mlocate.db')
 	bowtieIndex=findFile("#{name}*.ebwt", locate)
 	bowtieIndex= $1 if bowtieIndex =~ /(.*#{name}.*)\.\d+\.ebwt/i
 	resourceFiles=''
@@ -390,7 +395,7 @@ task :removeHuman => :alignSequence
 file sequence.removeNonMappedPath => sequence.novoalignPath do
 	puts 'RemoveHuman'
 	seqFileName = sequence.novoalignPath if forceFile != 'true'
-	exitStatus = safeExec("\"#{PROG_DIR}/Xnovotonm.pl\" \"#{seqFileName}\";", log, sequence,
+	exitStatus = safeExec("perl \"#{PROG_DIR}/Xnovotonm.pl\" \"#{seqFileName}\";", log, sequence,
 			'Removal of Human mapped reads from novoalign results not performed')
 	if exitStatus == 0
 		readsLeft=`egrep -c '^[ACTGN]' "#{sequence.removeNonMappedPath}"`
@@ -412,9 +417,9 @@ file sequence.blast1Path => sequence.removeNonMappedPath do
 			'TopHat sequence alignment not performed')
 	safeExec("samtools view -h -o \"#{ENV['seq']}_tophat_out/accepted_hits.sam\" \"#{ENV['seq']}_tophat_out/accepted_hits.bam\";", log, sequence,
 			'Samtools conversion not performed')
-	safeExec("\"#{PROG_DIR}/Xextractspans.pl\" \"#{ENV['seq']}_tophat_out/accepted_hits.sam\";", log, sequence,
+	safeExec("perl \"#{PROG_DIR}/Xextractspans.pl\" \"#{ENV['seq']}_tophat_out/accepted_hits.sam\";", log, sequence,
 			'Spanning region extraction not performed')
-	exitStatus = safeExec("\"#{PROG_DIR}/Xfilterspans.pl\" \"#{sequence.removeNonMappedPath}\" \"#{ENV['seq']}_tophat_out/accepted_hits.sam.spans\";", log, sequence,
+	exitStatus = safeExec("perl \"#{PROG_DIR}/Xfilterspans.pl\" \"#{sequence.removeNonMappedPath}\" \"#{ENV['seq']}_tophat_out/accepted_hits.sam.spans\";", log, sequence,
 			'Filter of spanning regions not performed')
 	if exitStatus == 0
 		readsLeft=`egrep -cv '>' "#{sequence.blast1Path}"`
@@ -437,7 +442,6 @@ file sequence.megan1Path => sequence.blast1Path do
 	blastPieces = FileList["#{seqFileName}.[a-zA-Z0-9][a-zA-Z0-9]"]
 	piecesLeft = blastPieces.length
 	fileCount = [pieces, blastPieces.length].min
-	puts fileCount
 	@blastCommands = []
 	blastPieces.each { | blastPiece |
 		@blastCommands << "blastn -db \'#{progSettings.ntDatabase}\' -soft_masking true #{dust} -num_threads #{ncpu} -evalue #{sequence.eValue1} -outfmt #{sequence.blastOutputFormat} -query \'#{blastPiece}\' -out \'#{blastPiece}.blast\' &"
@@ -451,7 +455,7 @@ file sequence.megan1Path => sequence.blast1Path do
 		end
 	}
 	`cat #{seqFileName}.[a-z][a-z].blast > #{seqFileName}.mergedBlast`
-	safeExec("\"#{PROG_DIR}/addTaxon.pl\" \"#{progSettings.giTaxIdNuclDatabase.to_s}\" \"#{seqFileName}.mergedBlast\" \"#{seqFileName}\";", log, sequence,
+	safeExec("perl \"#{PROG_DIR}/addTaxon.pl\" \"#{progSettings.giTaxIdNuclDatabase.to_s}\" \"#{seqFileName}.mergedBlast\" \"#{seqFileName}\";", log, sequence,
 			'Adding taxon to end of file not performed')
 end
 
@@ -468,7 +472,7 @@ file sequence.abyssPath => sequence.megan1Path do
 		exitStatus, results = safeExec("MEGAN -f \"#{sequence.abyssPath}\" -x \"#{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;\";", log, sequence,
 			'Opening MEGAN file not performed')
 	else
-		safeExec("MEGAN +g -E -x \"import blastfile='#{sequence.megan1Path}' fastafile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{[(sequence.minSupport*`egrep -cv '>' "#{sequence.blast1Path}"`.chomp.to_i).to_i, 5].max} usecogs=#{sequence.useCogs} useseed=#{sequence.useSeed} usekegg=#{sequence.useKegg}; #{MEGAN_EXPANSION*sequence.expansionNumber} select nodes=all; uncollapse subtrees; update; exportimage format='#{sequence.imageFileType}' file='#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
+		safeExec("MEGAN +g -E -x \"import blastfile='#{sequence.megan1Path}' fastafile='#{sequence.blast1Path}' meganfile='#{sequence.abyssPath}' minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{[(sequence.minSupport*`egrep -cv '>' "#{sequence.blast1Path}"`.chomp.to_i).to_i, 5].max} usecogs=#{sequence.useCogs} useseed=#{sequence.useSeed} usekegg=#{sequence.useKegg}; #{MEGAN_EXPANSION*sequence.expansionNumber} select nodes=all; uncollapse subtrees; update; exportimage file= '#{sequence.megan1Path + '.' + sequence.imageFileType.downcase}' format= '#{sequence.imageFileType}' REPLACE=true; quit;\";", log, sequence,
 			'MEGAN processing of BLASTed reads not performed')
 		exitStatus, results = safeExec("MEGAN -f \"#{sequence.abyssPath}\" -x \"#{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all;\";", log, sequence,
 			'Opening MEGAN file not performed')
@@ -489,10 +493,11 @@ file sequence.blast2Path => FileList["#{sequence.abyssPathGlob}"] do
 	seqFileName = sequence.abyssPathGlob if forceFile != 'true'
 	exitStatus=-1
 	FileList["#{seqFileName}"].each { | abyssFiles |
-		exitStatus = safeExec("\"#{PROG_DIR}/abyssKmerOptimizer.pl\" #{abyssFiles} #{sequence.minKmerLength} #{sequence.maxKmerLength} #{setDataTypes.abyss};", log, sequence,
+		exitStatus = safeExec("perl \"#{PROG_DIR}/abyssKmerOptimizer.pl\" #{abyssFiles} #{sequence.minKmerLength} #{sequence.maxKmerLength} #{setDataTypes.abyss};", log, sequence,
 			'ABySS not performed')
 	}
-	`cat #{sequence.blastPathGlob} > #{sequence.blast2Path}` if forceFile != 'true'
+	`cat #{sequence.blastPathGlob} > #{sequence.blast2Path}.commentSpaces` if forceFile != 'true'
+	`sed 's/ /,/g' #{sequence.blast2Path}.commentSpaces > #{sequence.blast2Path}`
 	if exitStatus == 0
 		coverageThreshold = $_ if (results =~ /(Using a coverage threshold of \d+)/)
 		medianKmerCoverage = $_ if (results =~ /(The median k-mer coverage is \d+)/)
@@ -510,7 +515,7 @@ file sequence.megan2Path => sequence.blast2Path do
 	seqFileName = sequence.blast2Path if forceFile != 'true'
 	safeExec("blastn -db \"#{progSettings.ntDatabase}\" -soft_masking true -num_threads #{ncpu} -evalue #{sequence.eValue2} -outfmt #{sequence.blastOutputFormat} -query \"#{seqFileName}\" -out \"#{sequence.megan2Path}.noTax\";", log, sequence,
 			'BLAST of contigs not performed')
-	safeExec("\"#{PROG_DIR}/addTaxon.pl\" \"#{progSettings.giTaxIdNuclDatabase.to_s}\" \"#{sequence.megan2Path}.noTax\" \"#{seqFileName}\";", log, sequence,
+	safeExec("perl \"#{PROG_DIR}/addTaxon.pl\" \"#{progSettings.giTaxIdNuclDatabase.to_s}\" \"#{sequence.megan2Path}.noTax\" \"#{seqFileName}\";", log, sequence,
 			'Adding taxon to end of BLAST contigs file not performed')
 end
 
@@ -523,12 +528,12 @@ file sequence.pipeEndPath => sequence.megan2Path do
 	if ($1.to_f < 4.0)
 		safeExec("MEGAN +g -E -x \"import blastfile='#{sequence.megan2Path}' readfile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{[(sequence.minSupport*`egrep -cv '>' "#{sequence.blast2Path}"`.chomp.to_i).to_i, 5].max} summaryonly=false usecompression=true usecogs=#{sequence.useCogs} usegos=#{sequence.useGos} useseed=false; #{MEGAN_EXPANSION*sequence.expansionNumber} uncollapse all; update; exportgraphics format='#{sequence.imageFileType}' file='#{sequence.megan2Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
 				'MEGAN processing of BLASTed contigs not performed')
-		exitStatus, results = safeExec("MEGAN -f \"#{sequence.pipeEndPath}.rma\";", log, sequence,
+		exitStatus, results = safeExec("MEGAN -f \"#{sequence.pipeEndPath}\";", log, sequence,
 				'Opening MEGAN file not performed')
 	else
-		safeExec("MEGAN +g -E -x \"import blastfile='#{sequence.megan2Path}' fastafile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{[(sequence.minSupport*`egrep -cv '>' "#{sequence.blast2Path}"`.chomp.to_i).to_i, 5].max} usecogs=#{sequence.useCogs} useseed=#{sequence.useSeed} usekegg=#{sequence.useKegg}; update; set context=seedviewer; #{MEGAN_EXPANSION*sequence.expansionNumber} select nodes=all; uncollapse subtrees; update; exportimage format='#{sequence.imageFileType}' file='#{sequence.megan2Path + '.' + sequence.imageFileType.downcase}' REPLACE=true; quit;\";", log, sequence,
+		safeExec("MEGAN +g -E -x \"import blastfile='#{sequence.megan2Path}' fastafile='#{sequence.blast2Path}' meganfile='#{sequence.pipeEndPath}' minscore=#{sequence.minScoreByLength} toppercent=#{sequence.topPercent} winscore=#{sequence.winScore} minsupport=#{[(sequence.minSupport*`egrep -cv '>' "#{sequence.blast2Path}"`.chomp.to_i).to_i, 5].max} usecogs=#{sequence.useCogs} useseed=#{sequence.useSeed} usekegg=#{sequence.useKegg}; #{MEGAN_EXPANSION*sequence.expansionNumber} select nodes=all; uncollapse subtrees; update; exportimage file= '#{sequence.megan2Path + '.' + sequence.imageFileType.downcase}' format= '#{sequence.imageFileType}' REPLACE=true; quit;\";", log, sequence,
 				'MEGAN processing of BLASTed contigs not performed')
-		exitStatus, results = safeExec("MEGAN -f \"#{sequence.pipeEndPath}.rma\";", log, sequence,
+		exitStatus, results = safeExec("MEGAN -f \"#{sequence.pipeEndPath}\";", log, sequence,
 				'Opening MEGAN file not performed')
 	end
 	if exitStatus == 0
@@ -547,6 +552,7 @@ end
 desc 'Install latest version of human genome database.'
 task :hgInstall do
 	if progSettings.humanGenomeDatabase.to_s.chomp.empty?
+		puts 'installing hg database'
 		progSettings.humanGenomeDatabase=File.dirname(findFile('chr*.fa', locate))
 		if progSettings.humanGenomeDatabase.to_s.chomp == '.'
 			hg = ''
@@ -586,6 +592,7 @@ end
 desc 'Install latest version of Novoalign.'
 task :novoalignInstall do
 	if !command? 'novoalign'
+		puts 'installing novoalign'
 		novoalign = ''
 		Net::HTTP.start('www.novocraft.com', 80) { |http|
 			http.get('/main/releases.php', 'Referer' => 'http://www.novocraft.com/').body =~ /(V\d+\.\d+\.\d+)/
@@ -620,6 +627,7 @@ end
 desc 'Install latest version of Bowtie.'
 task :bowtieInstall do
 	if !command? 'bowtie'
+		puts 'installing bowtie'
 		bowtie = ''
 		Net::HTTP.start('bowtie-bio.sourceforge.net', 80) { |http|
 			http.get('/index.shtml').body =~ /https:\/\/sourceforge\.net\/projects\/bowtie-bio\/files\/bowtie\/(\d*\.\d*\.\d*)/
@@ -649,6 +657,7 @@ end
 desc 'Install latest version of Samtools.'
 task :samtoolsInstall do
 	if !command? 'samtools'
+		puts 'installing samtools'
 		samtools = ''
 		File.open('samtools.tar.bz2', 'w'){ |file|
 			if useRepo == true
@@ -675,6 +684,7 @@ end
 desc 'Install latest version of Tophat.'
 task :tophatInstall => [:samtoolsInstall, :bowtieInstall] do
 	if !command? 'tophat'
+		puts 'installing tophat'
 		tophat = ''
 		Net::HTTP.start('tophat.cbcb.umd.edu', 80) { |http|
 			http.get('/index.html').body =~ /\.\/downloads\/(tophat-\d+\.\d+\.\d+\.tar\.gz)/
@@ -702,6 +712,7 @@ end
 desc 'Install latest version of ABySS with Google Sparsehash.'
 task :abyssInstall do
 	if !command? 'ABYSS'
+		puts 'installing ABYSS'
 		Net::HTTP.start('code.google.com', 80) { |http|
 			http.get('/p/google-sparsehash/').body =~ /(http:\/\/google-sparsehash\.googlecode\.com)(\/files\/sparsehash-\d+\.\d+\.tar\.gz)/
 		}
@@ -747,6 +758,7 @@ desc 'Install latest version of BLAST+.'
 task :blastInstall do
 	blast = ''
 	if !command? 'blastn'
+		puts 'installing BLAST+'
 		ftp = Net::FTP::new('ftp.ncbi.nlm.nih.gov')
 		ftp.login()
 		ftp.passive=true
@@ -762,7 +774,6 @@ task :blastInstall do
 			cd ReleaseMT/build;
 			make all_r;
 			
-			#sudo rm /usr/bin/blastdb_aliastool /usr/bin/dustmasker /usr/bin/rpstblastn /usr/bin/blastdbcheck /usr/bin/gene_info_reader /usr/bin/segmasker /usr/bin/blastdbcmd /usr/bin/gumbelparams /usr/bin/seqdb_demo /usr/bin/blast_formatter /usr/bin/srsearch /usr/bin/blastn /usr/bin/makeblastdb /usr/bin/tblastn /usr/bin/blastp /usr/bin/makembindex /usr/bin/tblastx /usr/bin/blastx /usr/bin/project_tree_builder /usr/bin/convert2blastmask /usr/bin/psiblast /usr/bin/windowmasker /usr/bin/datatool /usr/bin/rpsblast
 			ln -s /usr/bin/#{blast}/c++/ReleaseMT/bin/blastdb_aliastool /usr/bin;
 			ln -s /usr/bin/#{blast}/c++/ReleaseMT/bin/dustmasker /usr/bin;
 			ln -s /usr/bin/#{blast}/c++/ReleaseMT/bin/rpstblastn /usr/bin;
@@ -795,6 +806,7 @@ desc 'Install latest version of the NT database.'
 task :ntInstall => :blastInstall do
 	if ENV['BLASTDB'].to_s.empty?
 		if progSettings.ntDatabase.to_s.empty?
+			puts 'installing NT database'
 			progSettings.ntDatabase = findFile('nt.nal', locate).to_s.chomp('.nal')
 			if progSettings.ntDatabase.to_s.empty?
 				progSettings.ntDatabase='/usr/share/nt/nt'
@@ -814,6 +826,7 @@ end
 desc 'Install latest version of MEGAN.'
 task :meganInstall do
 	if !command? 'MEGAN'
+		puts 'installing MEGAN'
 		megan = ''
 		Net::HTTP.start('ab.inf.uni-tuebingen.de', 80) { |http|
 			http.get('/software/megan/welcome.html').body =~ /(\/data\/software\/[^"]*\/download\/welcome\.html)/
@@ -836,7 +849,8 @@ task :meganInstall do
 			rm #{megan};
 		}
 		megan = `which MEGAN`.chomp
-		`ln -s "#{findFile(MEGAN)}" /usr/bin` if megan.empty?
+		locate = (command? 'locate') && (!ENV['LOCATE_PATH'].to_s.empty? or File.exists? '/var/lib/mlocate/mlocate.db')
+		`ln -s "#{findFile('MEGAN', locate)}" /usr/bin` if megan.empty?
 		megan = `which MEGAN`.chomp
 		if (arch == 64) # If CPU architecture is 64-bit, allow for more than 2GB of RAM and force 64-bit Java.
 			text = File.new(megan).read.gsub(/"\$prg_dir\/\$progname" "-server" "-Xms\d+." "-Xmx\d+."/, "\"$prg_dir/$progname\" \"-server\" \"-d64\" \"-Xms#{memInGigs}G\" \"-Xmx#{memInGigs}G\"")
@@ -849,6 +863,7 @@ desc 'Install GI to Taxonomy ID database.'
 task :giTaxIdNuclInstall do
 	progSettings.giTaxIdNuclDatabase=findFile('gi_taxid_nucl.dmp', locate)
 	if progSettings.giTaxIdNuclDatabase.to_s.chomp == '.'
+		puts 'installing NT gi to TaxID database'
 		ftp = Net::FTP::new('ftp://ftp.ncbi.nih.gov')
 		ftp.login()
 		ftp.passive=true
@@ -864,6 +879,7 @@ desc 'Install latest version of Parallel::Iterator for perl.'
 task :parallelIteratorInstall do
 	`perl -MParallel::Iterator -e 1`
 	if $?.exitstatus != 0
+		puts 'installing Parallel::Iterator'
 		`perl -MCPAN -e 'install Parallel::Iterator'`
 	end
 end
@@ -872,6 +888,7 @@ desc 'Index the genome of a specified organism with Novo and Bowtie.'
 task :otherIndex do
 	puts 'OtherIndex'
 	if !indexName.empty? and !indexGlob.empty?
+		puts 'installing other indices'
 		buildNovoIndex(indexName, indexGlob)
 		buildBowtieIndex(indexName, indexGlob)
 	end
@@ -901,12 +918,14 @@ end
 
 desc 'Automatically saving any settings changes which may have been made'
 task :reserialize do
-    # Reserialize object in case any changes have been made
-    seqFile = File.open(".#{seqName}", 'w')
+	# Reserialize object in case any changes have been made
+	if !installMode
+		seqFile = File.open(".#{ENV['seq']}", 'w')
+		YAML.dump(sequence, seqFile)
+		seqFile.close
+	end
 	progSettingsFile = File.open(File.expand_path("~/.#{PROG_NAME}"), 'w')
-	YAML.dump(sequence, seqFile) if !installMode
 	YAML.dump(progSettings, progSettingsFile)
-	seqFile.close
 	progSettingsFile.close
 end
 
